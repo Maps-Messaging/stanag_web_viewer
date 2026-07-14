@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import type { DroneTask, TaskGeometryType, TaskType } from '../models/types';
 import type { MessageTransport } from '../messaging/transport';
 import { useAppStore } from '../state/useAppStore';
+import {createUuid} from "../services/uuid";
 
 interface Props {
   transport?: MessageTransport;
@@ -44,7 +45,7 @@ export function TaskPanel({ transport }: Props) {
 
     const point = { ...draftPoints[0], altitude };
     const task: DroneTask = {
-      id: crypto.randomUUID(),
+      id: createUuid(),
       droneId: selectedDrone.id,
       authorityGuid,
       type: taskType,

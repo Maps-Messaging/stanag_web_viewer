@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { BrokerConfiguration, Drone, DroneTask, EventLogEntry, GeoPoint, TaskType } from '../models/types';
+import { createUuid } from '../services/uuid';
 
 interface AppState {
   drones: Record<string, Drone>;
@@ -23,7 +24,8 @@ interface AppState {
 }
 
 const env = import.meta.env;
-const storedSourceUuid = localStorage.getItem('stanag-demo-source-uuid') ?? crypto.randomUUID();
+const storedSourceUuid = localStorage.getItem('stanag-demo-source-uuid') ?? createUuid();
+
 localStorage.setItem('stanag-demo-source-uuid', storedSourceUuid);
 
 const initialConfiguration: BrokerConfiguration = {
@@ -46,28 +48,74 @@ export const useAppStore = create<AppState>((set) => ({
   connected: false,
   connectionMessage: 'Disconnected',
   configuration: initialConfiguration,
-  upsertDrone: (drone) => set((state) => {
-    const existing = state.drones[drone.id];
-    return {
-      drones: {
-        ...state.drones,
-        [drone.id]: {
-          ...existing,
-          ...drone,
-          position: drone.position ?? existing?.position,
-          capabilities: drone.capabilities.length > 0 ? drone.capabilities : existing?.capabilities ?? [],
+
+  upsertDrone: (drone) =>
+      set((state) => {
+        const existing = state.drones[drone.id];
+
+        return {
+          drones: {
+            ...state.drones,
+            [drone.id]: {
+              ...existing,
+              ...drone,
+              position: drone.position ?? existing?.position,
+              capabilities: drone.capabilities.length > 0 ? drone.capabilities : existing?.capabilities ?? [],
+            },
+          },
+        };
+      }),
+
+  upsertTask: (task) =>
+      set((state) => ({
+        tasks: {
+          ...state.tasks,
+          [task.id]: task,
         },
-      },
-    };
-  }),
-  upsertTask: (task) => set((state) => ({ tasks: { ...state.tasks, [task.id]: task } })),
-  addEvent: (entry) => set((state) => ({
-    events: [{ ...entry, id: crypto.randomUUID(), timestamp: Date.now() }, ...state.events].slice(0, 100),
-  })),
-  selectDrone: (selectedDroneId) => set({ selectedDroneId, draftPoints: [] }),
-  selectTaskType: (taskType) => set({ taskType, draftPoints: [] }),
-  addDraftPoint: (point) => set({ draftPoints: [point] }),
-  clearDraftPoints: () => set({ draftPoints: [] }),
-  setConnection: (connected, connectionMessage) => set({ connected, connectionMessage }),
-  updateConfiguration: (configuration) => set({ configuration }),
+      })),
+
+  addEvent: (entry) =>
+      set((state) => ({
+        events: [
+          {
+            ...entry,
+            id: createUuid(),
+            timestamp: Date.now(),
+          },
+          ...state.events,
+        ].slice(0, 100),
+      })),
+
+  selectDrone: (selectedDroneId) =>
+      set({
+        selectedDroneId,
+        draftPoints: [],
+      }),
+
+  selectTaskType: (taskType) =>
+      set({
+        taskType,
+        draftPoints: [],
+      }),
+
+  addDraftPoint: (point) =>
+      set({
+        draftPoints: [point],
+      }),
+
+  clearDraftPoints: () =>
+      set({
+        draftPoints: [],
+      }),
+
+  setConnection: (connected, connectionMessage) =>
+      set({
+        connected,
+        connectionMessage,
+      }),
+
+  updateConfiguration: (configuration) =>
+      set({
+        configuration,
+      }),
 }));
