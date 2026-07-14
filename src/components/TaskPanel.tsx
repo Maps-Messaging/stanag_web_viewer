@@ -30,6 +30,7 @@ export function TaskPanel({ transport }: Props) {
     .filter((task) => task.droneId === selectedDroneId)
     .sort((a, b) => b.updatedAt - a.updatedAt)[0], [tasks, selectedDroneId]);
 
+  const supportedTaskTypes = selectedDrone?.capabilities.map((capability) => capability.taskType) ?? [];
   const requiredPoints = taskType === 'NAVIGATE' ? 2 : 1;
   const canSubmit = Boolean(selectedDrone && taskType && draftPoints.length >= requiredPoints && transport);
 
@@ -73,7 +74,14 @@ export function TaskPanel({ transport }: Props) {
       <Typography variant="overline">Task</Typography>
       <ButtonGroup fullWidth sx={{ mb: 2 }}>
         {(['REPOSITION', 'NAVIGATE', 'LOITER'] as TaskType[]).map((type) => (
-          <Button key={type} variant={taskType === type ? 'contained' : 'outlined'} onClick={() => selectTaskType(type)}>{type}</Button>
+          <Button
+            key={type}
+            variant={taskType === type ? 'contained' : 'outlined'}
+            disabled={Boolean(selectedDrone) && !supportedTaskTypes.includes(type)}
+            onClick={() => selectTaskType(type)}
+          >
+            {type}
+          </Button>
         ))}
       </ButtonGroup>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

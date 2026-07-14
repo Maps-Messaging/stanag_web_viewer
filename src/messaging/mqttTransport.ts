@@ -1,7 +1,7 @@
 import mqtt, { type MqttClient } from 'mqtt';
 import type { MessageTransport } from './transport';
 import type { BrokerConfiguration, DroneTask } from '../models/types';
-import { buildCancelCommand, buildTaskCommand, parseDroneState, parseTaskStatus } from '../services/stanagAdapter';
+import { buildCancelCommand, buildTaskCommand, parseNodeMessage, parseTaskStatus } from '../services/stanagAdapter';
 import { useAppStore } from '../state/useAppStore';
 
 export class MqttTransport implements MessageTransport {
@@ -62,7 +62,9 @@ export class MqttTransport implements MessageTransport {
     try {
       const payload: unknown = JSON.parse(body);
       if (topicMatches(this.configuration.droneTopic, topic)) {
-        store.upsertDrone(parseDroneState(payload));
+        const node = parseNodeMessage(payload);
+        store.upsertDrone(node.drone);
+        store.addEvent({ level: 'INFO', message: `${node.messageType}: ${node.drone.name}`, payload });
       } else if (topicMatches(this.configuration.taskStatusTopic, topic)) {
         const status = parseTaskStatus(payload);
         const existing = store.tasks[status.taskId];

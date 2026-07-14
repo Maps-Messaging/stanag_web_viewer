@@ -1,5 +1,5 @@
 import FlightIcon from '@mui/icons-material/Flight';
-import { Box, Chip, List, ListItemButton, ListItemIcon, ListItemText, Paper, Typography } from '@mui/material';
+import { Box, Chip, List, ListItemButton, ListItemIcon, ListItemText, Paper, Stack, Typography } from '@mui/material';
 import { useAppStore } from '../state/useAppStore';
 
 export function DroneList() {
@@ -19,12 +19,21 @@ export function DroneList() {
             <ListItemIcon><FlightIcon sx={{ transform: `rotate(${drone.heading}deg)` }} /></ListItemIcon>
             <ListItemText
               primary={drone.name}
-              secondary={`${drone.position.altitude?.toFixed(0) ?? 0} m · ${drone.groundSpeed.toFixed(1)} m/s`}
+              secondary={drone.position
+                ? `${drone.position.altitude?.toFixed(1) ?? 0} m · ${drone.groundSpeed.toFixed(2)} m/s`
+                : 'Waiting for node status'}
             />
-            <Chip size="small" label={`${drone.batteryPercent ?? '?'}%`} />
+            <Stack direction="row" spacing={0.5}>
+              {drone.symbolSet && <Chip size="small" label={shortEnum(drone.symbolSet)} />}
+              <Chip size="small" label={drone.position ? 'LIVE' : 'KNOWN'} color={drone.position ? 'success' : 'default'} />
+            </Stack>
           </ListItemButton>
         ))}
       </List>
     </Paper>
   );
+}
+
+function shortEnum(value: string): string {
+  return value.replace(/^.*Enum_/, '').replaceAll('_', ' ');
 }

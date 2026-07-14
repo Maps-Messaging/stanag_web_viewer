@@ -25,11 +25,11 @@ interface AppState {
 const env = import.meta.env;
 
 const initialConfiguration: BrokerConfiguration = {
-  transport: (env.VITE_TRANSPORT ?? 'mock') as BrokerConfiguration['transport'],
-  brokerUrl: env.VITE_BROKER_URL ?? 'ws://localhost:8083/mqtt',
+  transport: (env.VITE_TRANSPORT ?? 'stomp') as BrokerConfiguration['transport'],
+  brokerUrl: env.VITE_BROKER_URL ?? 'ws://localhost:8674/stomp',
   username: env.VITE_USERNAME ?? '',
   password: env.VITE_PASSWORD ?? '',
-  droneTopic: env.VITE_DRONE_TOPIC ?? 'stanag/drone/+/state',
+  droneTopic: env.VITE_DRONE_TOPIC ?? '4817/catl/maps/json/+/+',
   taskStatusTopic: env.VITE_TASK_STATUS_TOPIC ?? 'stanag/task/+/status',
   taskCommandTopic: env.VITE_TASK_COMMAND_TOPIC ?? 'stanag/task/command',
   taskCancelTopic: env.VITE_TASK_CANCEL_TOPIC ?? 'stanag/task/cancel',
@@ -43,7 +43,20 @@ export const useAppStore = create<AppState>((set) => ({
   connected: false,
   connectionMessage: 'Disconnected',
   configuration: initialConfiguration,
-  upsertDrone: (drone) => set((state) => ({ drones: { ...state.drones, [drone.id]: drone } })),
+  upsertDrone: (drone) => set((state) => {
+    const existing = state.drones[drone.id];
+    return {
+      drones: {
+        ...state.drones,
+        [drone.id]: {
+          ...existing,
+          ...drone,
+          position: drone.position ?? existing?.position,
+          capabilities: drone.capabilities.length > 0 ? drone.capabilities : existing?.capabilities ?? [],
+        },
+      },
+    };
+  }),
   upsertTask: (task) => set((state) => ({ tasks: { ...state.tasks, [task.id]: task } })),
   addEvent: (entry) =>
     set((state) => ({

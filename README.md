@@ -60,3 +60,18 @@ Replace the example command builders and incoming-event parsers there with the e
 5. Submit the task.
 6. Watch task status updates in the right panel.
 7. Cancel an executing task with the Cancel button.
+
+## Implemented CATL node messages
+
+The application now decodes these MapsMessaging CATL/STANAG JSON messages directly:
+
+- `MessageTypeEnum_NODE_DESCRIPTION`
+- `MessageTypeEnum_NODE_STATUS`
+
+Default MQTT subscription:
+
+```text
+4817/catl/maps/json/+/+
+```
+
+`NODE_DESCRIPTION` updates identity, display metadata, symbol information, and task capabilities. `NODE_STATUS` updates live position, Euler orientation, speed/course/climb rate, and validity timestamps. Capabilities are preserved when later status messages omit them. A `0,0` description pose is not rendered on the map.

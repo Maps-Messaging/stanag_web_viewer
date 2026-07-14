@@ -1,18 +1,45 @@
-export type TransportKind = 'mock' | 'mqtt' | 'stomp';
+export type TransportKind = 'mqtt' | 'stomp';
 
 export interface GeoPoint {
   latitude: number;
   longitude: number;
   altitude?: number;
+  altitudeType?: string;
+}
+
+export interface DroneCapability {
+  taskType: string;
+  taskSpecialization: string;
+  authorities: string[];
 }
 
 export interface Drone {
   id: string;
   name: string;
-  position: GeoPoint;
+  description?: string;
+  organization?: string;
+  nationality?: string;
+  contextType?: string;
+  standardIdentity?: string;
+  symbolSet?: string;
+  entityStatus?: string;
+  entity?: string;
+  entityType?: string;
+  entitySubtype?: string;
+  sector1?: string;
+  sector2?: string;
+  position?: GeoPoint;
   heading: number;
+  roll?: number;
+  pitch?: number;
   groundSpeed: number;
+  course?: number;
+  climbRate?: number;
   batteryPercent?: number;
+  capabilities: DroneCapability[];
+  stateTimestamp?: number;
+  validUntil?: number;
+  initiatedAt?: number;
   lastSeen: number;
   activeTaskId?: string;
 }
