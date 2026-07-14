@@ -17,7 +17,7 @@ export function MapView() {
     if (!containerRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      center: [ 24.829501, 59.467137],
+      center: [24.829501, 59.467137],
       zoom: 12,
       style: {
         version: 8,
@@ -108,15 +108,11 @@ export function MapView() {
     if (!map?.isStyleLoaded()) return;
     const source = map.getSource('task-geometry') as GeoJSONSource | undefined;
     if (!source) return;
-    const coordinates = draftPoints.map((point) => [point.longitude, point.latitude]);
     const features: GeoJSON.Feature[] = draftPoints.map((point) => ({
       type: 'Feature',
       properties: {},
       geometry: { type: 'Point', coordinates: [point.longitude, point.latitude] },
     }));
-    if (taskType === 'NAVIGATE' && coordinates.length >= 2) {
-      features.unshift({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } });
-    }
     source.setData({ type: 'FeatureCollection', features });
   }, [draftPoints, taskType]);
 

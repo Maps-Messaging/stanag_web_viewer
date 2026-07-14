@@ -35,7 +35,6 @@ export interface Drone {
   groundSpeed: number;
   course?: number;
   climbRate?: number;
-  batteryPercent?: number;
   capabilities: DroneCapability[];
   stateTimestamp?: number;
   validUntil?: number;
@@ -44,7 +43,8 @@ export interface Drone {
   activeTaskId?: string;
 }
 
-export type TaskType = 'REPOSITION' | 'NAVIGATE' | 'LOITER';
+export type TaskType = 'REPOSITION' | 'LOITER';
+export type TaskGeometryType = 'POINT' | 'CIRCLE';
 
 export type TaskState =
   | 'DRAFT'
@@ -57,23 +57,19 @@ export type TaskState =
   | 'FAILED'
   | 'REJECTED';
 
-export interface TaskParameters {
-  altitude: number;
-  speed: number;
-  radius?: number;
-  clockwise?: boolean;
-}
-
 export interface DroneTask {
   id: string;
   droneId: string;
+  authorityGuid: string;
   type: TaskType;
-  points: GeoPoint[];
-  parameters: TaskParameters;
+  geometryType: TaskGeometryType;
+  point: GeoPoint;
+  radiusMeters?: number;
   state: TaskState;
   createdAt: number;
   updatedAt: number;
   message?: string;
+  percentComplete?: number;
 }
 
 export interface EventLogEntry {
@@ -91,6 +87,7 @@ export interface BrokerConfiguration {
   password: string;
   droneTopic: string;
   taskStatusTopic: string;
-  taskCommandTopic: string;
-  taskCancelTopic: string;
+  taskAdminTopic: string;
+  sourceUuid: string;
+  stanagVersion: string;
 }

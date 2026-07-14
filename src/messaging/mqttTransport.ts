@@ -1,8 +1,9 @@
 import mqtt, { type MqttClient } from 'mqtt';
-import type { MessageTransport } from './transport';
 import type { BrokerConfiguration, DroneTask } from '../models/types';
-import { buildCancelCommand, buildTaskCommand, parseNodeMessage, parseTaskStatus } from '../services/stanagAdapter';
+import { buildTaskAdminCancel, buildTaskAdminPush, resolveTaskAdminDestination } from '../services/stanagAdapter';
 import { useAppStore } from '../state/useAppStore';
+import { dispatchStanagMessage } from './messageDispatcher';
+import type { MessageTransport } from './transport';
 
 export class MqttTransport implements MessageTransport {
   private client?: MqttClient;
@@ -21,7 +22,8 @@ export class MqttTransport implements MessageTransport {
     await new Promise<void>((resolve, reject) => {
       const client = this.client!;
       client.once('connect', () => {
-        client.subscribe([this.configuration.droneTopic, this.configuration.taskStatusTopic], (error) => {
+        const subscriptions = [this.configuration.droneTopic, this.configuration.taskStatusTopic].filter(Boolean);
+        client.subscribe(subscriptions, (error) => {
           if (error) {
             reject(error);
             return;
@@ -45,32 +47,25 @@ export class MqttTransport implements MessageTransport {
   }
 
   async publishTask(task: DroneTask): Promise<void> {
-    await this.publish(this.configuration.taskCommandTopic, buildTaskCommand(task));
+    await this.publish(task, buildTaskAdminPush(this.configuration, task));
   }
 
   async cancelTask(task: DroneTask): Promise<void> {
-    await this.publish(this.configuration.taskCancelTopic, buildCancelCommand(task));
+    await this.publish(task, buildTaskAdminCancel(this.configuration, task));
   }
 
-  private async publish(topic: string, payload: unknown): Promise<void> {
+  private async publish(task: DroneTask, payload: unknown): Promise<void> {
     if (!this.client?.connected) throw new Error('MQTT client is not connected');
-    await this.client.publishAsync(topic, JSON.stringify(payload), { qos: 1 });
+    const topic = resolveTaskAdminDestination(this.configuration.taskAdminTopic, task.droneId);
+    await this.client.publishAsync(topic, JSON.stringify(payload), { qos: 1, retain: false });
   }
 
   private handleMessage(topic: string, body: string): void {
     const store = useAppStore.getState();
     try {
       const payload: unknown = JSON.parse(body);
-      if (topicMatches(this.configuration.droneTopic, topic)) {
-        const node = parseNodeMessage(payload);
-        store.upsertDrone(node.drone);
-        store.addEvent({ level: 'INFO', message: `${node.messageType}: ${node.drone.name}`, payload });
-      } else if (topicMatches(this.configuration.taskStatusTopic, topic)) {
-        const status = parseTaskStatus(payload);
-        const existing = store.tasks[status.taskId];
-        if (existing) {
-          store.upsertTask({ ...existing, state: status.state, updatedAt: Date.now(), message: status.message });
-        }
+      if (topicMatches(this.configuration.droneTopic, topic) || (this.configuration.taskStatusTopic && topicMatches(this.configuration.taskStatusTopic, topic))) {
+        dispatchStanagMessage(payload);
       }
     } catch (error) {
       store.addEvent({ level: 'ERROR', message: `MQTT message rejected on ${topic}: ${String(error)}`, payload: body });
@@ -81,5 +76,12 @@ export class MqttTransport implements MessageTransport {
 function topicMatches(filter: string, topic: string): boolean {
   const filterParts = filter.split('/');
   const topicParts = topic.split('/');
-  return filterParts.every((part, index) => part === '#' || part === '+' || part === topicParts[index]);
+
+  for (let index = 0; index < filterParts.length; index++) {
+    const part = filterParts[index];
+    if (part === '#') return true;
+    if (part !== '+' && part !== topicParts[index]) return false;
+  }
+
+  return filterParts.length === topicParts.length;
 }

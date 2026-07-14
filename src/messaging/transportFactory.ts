@@ -1,7 +1,7 @@
 import type { BrokerConfiguration } from '../models/types';
-import type { MessageTransport } from './transport';
 import { MqttTransport } from './mqttTransport';
 import { StompTransport } from './stompTransport';
+import type { MessageTransport } from './transport';
 
 export function createTransport(configuration: BrokerConfiguration): MessageTransport {
   switch (configuration.transport) {

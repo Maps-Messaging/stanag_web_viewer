@@ -1,9 +1,11 @@
-import type { Drone, DroneCapability, DroneTask, GeoPoint, TaskState, TaskType } from '../models/types';
+import type { BrokerConfiguration, Drone, DroneCapability, DroneTask, GeoPoint, TaskState } from '../models/types';
 
 export interface ParsedTaskStatus {
+  messageType: 'MessageTypeEnum_TASK_FEEDBACK' | 'MessageTypeEnum_TASK_RESULT';
   taskId: string;
   droneId: string;
   state: TaskState;
+  percentComplete?: number;
   message?: string;
 }
 
@@ -87,7 +89,7 @@ export function parseNodeMessage(payload: unknown): ParsedNodeMessage {
     sector1: optionalString(description?.sector_1),
     sector2: optionalString(description?.sector_2),
     position: messageType === 'MessageTypeEnum_NODE_DESCRIPTION' && isNullIsland(position) ? undefined : position,
-    heading: radiansToHeading(orientation?.yaw),
+    heading: normaliseHeading(orientation?.yaw),
     roll: orientation?.roll,
     pitch: orientation?.pitch,
     groundSpeed: movement?.speed ?? 0,
@@ -105,8 +107,7 @@ export function parseNodeMessage(payload: unknown): ParsedNodeMessage {
 
 function parsePosition(pose: Record<string, unknown> | undefined): GeoPoint | undefined {
   const position = optionalObject(pose?.position);
-  if (!position) return undefined;
-  if (position.$discriminator !== 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE') return undefined;
+  if (!position || position.$discriminator !== 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE') return undefined;
 
   const lla = optionalObject(position.latitude_longitude_altitude);
   if (!lla) return undefined;
@@ -176,49 +177,176 @@ function isNullIsland(position: GeoPoint | undefined): boolean {
   return position?.latitude === 0 && position.longitude === 0;
 }
 
-function radiansToHeading(yaw: number | undefined): number {
+function normaliseHeading(yaw: number | undefined): number {
   if (yaw === undefined) return 0;
-  const degrees = yaw * 180 / Math.PI;
-  return (degrees % 360 + 360) % 360;
+  return (yaw % 360 + 360) % 360;
+}
+
+export function buildTaskAdminPush(configuration: BrokerConfiguration, task: DroneTask): unknown {
+  const timestamp = stanagTimestamp();
+  return {
+    header: buildTaskAdminHeader(configuration, timestamp),
+    body: {
+      action: 'TaskAdminActionEnum_PUSH',
+      identifier: task.id,
+      node: task.droneId,
+      authority: buildAuthority(task.authorityGuid),
+      description: buildTaskDescription(task, timestamp),
+    },
+  };
+}
+
+export function buildTaskAdminCancel(configuration: BrokerConfiguration, task: DroneTask): unknown {
+  const timestamp = stanagTimestamp();
+  return {
+    header: buildTaskAdminHeader(configuration, timestamp),
+    body: {
+      action: 'TaskAdminActionEnum_CANCEL',
+      identifier: task.id,
+      node: task.droneId,
+      authority: buildAuthority(task.authorityGuid),
+    },
+  };
+}
+
+export function resolveTaskAdminDestination(template: string, droneId: string): string {
+  return template
+    .replaceAll('{droneUuid}', droneId)
+    .replaceAll('{droneId}', droneId);
+}
+
+function buildTaskAdminHeader(configuration: BrokerConfiguration, timestamp: string): unknown {
+  return {
+    message_type: 'MessageTypeEnum_TASK_ADMIN',
+    source: configuration.sourceUuid,
+    time_sent: timestamp,
+    version: configuration.stanagVersion,
+  };
+}
+
+function buildAuthority(authorityGuid: string): unknown {
+  return {
+    $discriminator: 'AuthorityTypeEnum_GUID',
+    guid: authorityGuid,
+  };
+}
+
+function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
+  if (task.type === 'REPOSITION') {
+    return {
+      $discriminator: 'TaskTypeEnum_REPOSITION',
+      reposition: {
+        location: {
+          identifier: crypto.randomUUID(),
+          timestamp,
+          location: {
+            $discriminator: 'GeometryTypeEnum_POINT',
+            point: buildPosition(task.point),
+          },
+        },
+      },
+    };
+  }
+
+  if (task.geometryType === 'POINT') {
+    return {
+      $discriminator: 'TaskTypeEnum_LOITER',
+      loiter: {
+        pose: {
+          identifier: crypto.randomUUID(),
+          timestamp,
+          pose: {
+            position: {
+              $discriminator: 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE',
+              latitude_longitude_altitude: {
+                latitude: task.point.latitude,
+                longitude: task.point.longitude,
+              },
+            },
+          },
+        },
+      },
+    };
+  }
+
+  return {
+    $discriminator: 'TaskTypeEnum_LOITER',
+    loiter: {
+      volume: {
+        identifier: crypto.randomUUID(),
+        timestamp,
+        volume: {
+          region: {
+            $discriminator: 'RegionTypeEnum_CIRCLE',
+            circle: {
+              centre: buildPosition(task.point),
+              radius: task.radiusMeters,
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function buildPosition(point: GeoPoint): unknown {
+  return {
+    latitude: point.latitude,
+    longitude: point.longitude,
+    altitude: point.altitude ?? 0,
+  };
+}
+
+function stanagTimestamp(): string {
+  return new Date().toISOString();
+}
+
+export function getStanagMessageType(payload: unknown): string {
+  const envelope = asObject(payload, 'message');
+  const header = asObject(envelope.header, 'header');
+  return asString(header.message_type, 'header.message_type');
 }
 
 export function parseTaskStatus(payload: unknown): ParsedTaskStatus {
-  const data = asObject(payload);
+  const envelope = asObject(payload, 'message');
+  const header = asObject(envelope.header, 'header');
+  const body = asObject(envelope.body, 'body');
+  const messageType = asString(header.message_type, 'header.message_type');
+
+  if (messageType !== 'MessageTypeEnum_TASK_FEEDBACK' && messageType !== 'MessageTypeEnum_TASK_RESULT') {
+    throw new Error(`Unsupported task message type: ${messageType}`);
+  }
+
+  const stanagState = asString(body.state, 'body.state');
+
   return {
-    taskId: asString(data.taskId, 'taskId'),
-    droneId: asString(data.droneId, 'droneId'),
-    state: asString(data.state, 'state') as TaskState,
-    message: typeof data.message === 'string' ? data.message : undefined,
+    messageType,
+    taskId: asString(body.identifier, 'body.identifier'),
+    droneId: asString(body.node ?? header.source, 'body.node'),
+    state: mapTaskState(stanagState),
+    percentComplete: optionalNumber(body.percent_complete),
+    message: optionalString(body.message),
   };
 }
 
-export function buildTaskCommand(task: DroneTask): unknown {
-  return {
-    messageType: 'TASK_COMMAND',
-    taskId: task.id,
-    target: { droneId: task.droneId },
-    task: {
-      type: task.type,
-      geometry: buildGeometry(task.type, task.points),
-      parameters: task.parameters,
-    },
-    createdAt: new Date(task.createdAt).toISOString(),
-  };
-}
-
-export function buildCancelCommand(task: DroneTask): unknown {
-  return {
-    messageType: 'TASK_CANCEL',
-    taskId: task.id,
-    target: { droneId: task.droneId },
-    createdAt: new Date().toISOString(),
-  };
-}
-
-function buildGeometry(type: TaskType, points: GeoPoint[]): unknown {
-  switch (type) {
-    case 'REPOSITION': return { type: 'POINT', point: points[0] };
-    case 'NAVIGATE': return { type: 'LINE', points };
-    case 'LOITER': return { type: 'ORBIT', centre: points[0] };
+function mapTaskState(state: string): TaskState {
+  switch (state) {
+    case 'TaskStateEnum_PENDING':
+    case 'TaskStateEnum_ACCEPTED':
+      return 'ACCEPTED';
+    case 'TaskStateEnum_ACTIVE':
+      return 'EXECUTING';
+    case 'TaskStateEnum_SUCCEEDED':
+      return 'COMPLETED';
+    case 'TaskStateEnum_CANCELLED':
+    case 'TaskStateEnum_CANCELED':
+      return 'CANCELLED';
+    case 'TaskStateEnum_REJECTED':
+      return 'REJECTED';
+    case 'TaskStateEnum_FAILED':
+    case 'TaskStateEnum_ABORTED':
+      return 'FAILED';
+    default:
+      throw new Error(`Unsupported STANAG task state: ${state}`);
   }
 }
