@@ -32,3 +32,7 @@ npm run dev
 ```
 
 No `package-lock.json` is included in the ZIP.
+
+## Map task display
+
+Selecting a drone marker opens a live telemetry popup. Submitted reposition and loiter targets remain visible on the map while the task is active. Completed and cancelled task geometry is removed automatically when the corresponding task result is received.

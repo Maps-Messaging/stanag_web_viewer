@@ -57,3 +57,72 @@ html, body, #root {
       "events events";
   }
 }
+
+.drone-popup {
+  min-width: 260px;
+  color: #111;
+  font-size: 13px;
+}
+
+.drone-popup > strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 15px;
+}
+
+.drone-popup-description {
+  margin-bottom: 8px;
+  color: #555;
+}
+
+.drone-popup table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.drone-popup td {
+  padding: 2px 0;
+  vertical-align: top;
+}
+
+.drone-popup td:first-child {
+  padding-right: 12px;
+  color: #666;
+}
+
+.drone-popup td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.task-popup {
+  min-width: 220px;
+  color: #111;
+  font-size: 13px;
+}
+
+.task-popup > strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 15px;
+}
+
+.task-popup table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.task-popup td {
+  padding: 2px 0;
+  vertical-align: top;
+}
+
+.task-popup td:first-child {
+  padding-right: 12px;
+  color: #666;
+}
+
+.task-popup td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

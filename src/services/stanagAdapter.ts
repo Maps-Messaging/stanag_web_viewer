@@ -1,5 +1,5 @@
 import type { BrokerConfiguration, Drone, DroneCapability, DroneTask, GeoPoint, TaskState } from '../models/types';
-import {createUuid} from "./uuid";
+import { createUuid } from './uuid';
 
 export interface ParsedTaskStatus {
   messageType: 'MessageTypeEnum_TASK_FEEDBACK' | 'MessageTypeEnum_TASK_RESULT';
@@ -254,7 +254,7 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
       $discriminator: 'TaskTypeEnum_LOITER',
       loiter: {
         pose: {
-          identifier:  createUuid(),
+          identifier: createUuid(),
           timestamp,
           pose: {
             position: {

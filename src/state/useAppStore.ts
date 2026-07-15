@@ -25,7 +25,6 @@ interface AppState {
 
 const env = import.meta.env;
 const storedSourceUuid = localStorage.getItem('stanag-demo-source-uuid') ?? createUuid();
-
 localStorage.setItem('stanag-demo-source-uuid', storedSourceUuid);
 
 const initialConfiguration: BrokerConfiguration = {
@@ -48,74 +47,28 @@ export const useAppStore = create<AppState>((set) => ({
   connected: false,
   connectionMessage: 'Disconnected',
   configuration: initialConfiguration,
-
-  upsertDrone: (drone) =>
-      set((state) => {
-        const existing = state.drones[drone.id];
-
-        return {
-          drones: {
-            ...state.drones,
-            [drone.id]: {
-              ...existing,
-              ...drone,
-              position: drone.position ?? existing?.position,
-              capabilities: drone.capabilities.length > 0 ? drone.capabilities : existing?.capabilities ?? [],
-            },
-          },
-        };
-      }),
-
-  upsertTask: (task) =>
-      set((state) => ({
-        tasks: {
-          ...state.tasks,
-          [task.id]: task,
+  upsertDrone: (drone) => set((state) => {
+    const existing = state.drones[drone.id];
+    return {
+      drones: {
+        ...state.drones,
+        [drone.id]: {
+          ...existing,
+          ...drone,
+          position: drone.position ?? existing?.position,
+          capabilities: drone.capabilities.length > 0 ? drone.capabilities : existing?.capabilities ?? [],
         },
-      })),
-
-  addEvent: (entry) =>
-      set((state) => ({
-        events: [
-          {
-            ...entry,
-            id: createUuid(),
-            timestamp: Date.now(),
-          },
-          ...state.events,
-        ].slice(0, 100),
-      })),
-
-  selectDrone: (selectedDroneId) =>
-      set({
-        selectedDroneId,
-        draftPoints: [],
-      }),
-
-  selectTaskType: (taskType) =>
-      set({
-        taskType,
-        draftPoints: [],
-      }),
-
-  addDraftPoint: (point) =>
-      set({
-        draftPoints: [point],
-      }),
-
-  clearDraftPoints: () =>
-      set({
-        draftPoints: [],
-      }),
-
-  setConnection: (connected, connectionMessage) =>
-      set({
-        connected,
-        connectionMessage,
-      }),
-
-  updateConfiguration: (configuration) =>
-      set({
-        configuration,
-      }),
+      },
+    };
+  }),
+  upsertTask: (task) => set((state) => ({ tasks: { ...state.tasks, [task.id]: task } })),
+  addEvent: (entry) => set((state) => ({
+    events: [{ ...entry, id: createUuid(), timestamp: Date.now() }, ...state.events].slice(0, 100),
+  })),
+  selectDrone: (selectedDroneId) => set({ selectedDroneId, draftPoints: [] }),
+  selectTaskType: (taskType) => set({ taskType, draftPoints: [] }),
+  addDraftPoint: (point) => set({ draftPoints: [point] }),
+  clearDraftPoints: () => set({ draftPoints: [] }),
+  setConnection: (connected, connectionMessage) => set({ connected, connectionMessage }),
+  updateConfiguration: (configuration) => set({ configuration }),
 }));

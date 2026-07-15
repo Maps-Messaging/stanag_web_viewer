@@ -5,8 +5,8 @@ import { Alert, Box, Button, ButtonGroup, Divider, LinearProgress, MenuItem, Pap
 import { useMemo, useState } from 'react';
 import type { DroneTask, TaskGeometryType, TaskType } from '../models/types';
 import type { MessageTransport } from '../messaging/transport';
+import { createUuid } from '../services/uuid';
 import { useAppStore } from '../state/useAppStore';
-import {createUuid} from "../services/uuid";
 
 interface Props {
   transport?: MessageTransport;
