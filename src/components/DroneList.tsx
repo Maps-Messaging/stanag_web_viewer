@@ -1,11 +1,14 @@
 import FlightIcon from '@mui/icons-material/Flight';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import {
     Box,
     Chip,
+    IconButton,
     List,
     ListItemButton,
     Paper,
     Stack,
+    Tooltip,
     Typography,
 } from '@mui/material';
 import { useState } from 'react';
@@ -23,11 +26,6 @@ export function DroneList() {
     const dialogDrone = dialogDroneId
         ? droneMap[dialogDroneId]
         : undefined;
-
-    function openDrone(droneId: string): void {
-        selectDrone(droneId);
-        setDialogDroneId(droneId);
-    }
 
     return (
         <>
@@ -49,7 +47,7 @@ export function DroneList() {
                         <ListItemButton
                             key={drone.id}
                             selected={drone.id === selectedDroneId}
-                            onClick={() => openDrone(drone.id)}
+                            onClick={() => selectDrone(drone.id)}
                             sx={{
                                 alignItems: 'center',
                                 gap: 1.25,
@@ -68,12 +66,35 @@ export function DroneList() {
                                     flex: 1,
                                 }}
                             >
-                                <Typography
-                                    variant="body2"
-                                    noWrap
+                                <Stack
+                                    direction="row"
+                                    spacing={0.5}
+                                    alignItems="center"
                                 >
-                                    {drone.name}
-                                </Typography>
+                                    <Typography
+                                        variant="body2"
+                                        noWrap
+                                        sx={{
+                                            minWidth: 0,
+                                            flex: 1,
+                                        }}
+                                    >
+                                        {drone.name}
+                                    </Typography>
+
+                                    <Tooltip title="Drone details">
+                                        <IconButton
+                                            size="small"
+                                            aria-label={`Show details for ${drone.name}`}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                setDialogDroneId(drone.id);
+                                            }}
+                                        >
+                                            <InfoOutlinedIcon fontSize="small" />
+                                        </IconButton>
+                                    </Tooltip>
+                                </Stack>
 
                                 <Stack
                                     direction="row"

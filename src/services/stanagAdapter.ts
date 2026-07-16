@@ -320,13 +320,18 @@ export function parseTaskStatus(payload: unknown): ParsedTaskStatus {
 
   const stanagState = asString(body.state, 'body.state');
 
+  const resultReason = optionalObject(body.result_reason);
+
   return {
     messageType,
     taskId: asString(body.identifier, 'body.identifier'),
     droneId: asString(body.node ?? header.source, 'body.node'),
     state: mapTaskState(stanagState),
     percentComplete: optionalNumber(body.percent_complete),
-    message: optionalString(body.message),
+
+    message:
+        optionalString(resultReason?.name)
+        ?? optionalString(body.message),
   };
 }
 
