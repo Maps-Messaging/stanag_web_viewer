@@ -1,5 +1,14 @@
 import { create } from 'zustand';
-import type { BrokerConfiguration, Drone, DroneTask, EventLogEntry, GeoPoint, TaskType } from '../models/types';
+import type {
+  BrokerConfiguration,
+  Drone,
+  DroneTask,
+  DroneTelemetryUpdate,
+  EventLogEntry,
+  GeoPoint,
+  MavlinkStreamStatus,
+  TaskType,
+} from '../models/types';
 import { createUuid } from '../services/uuid';
 
 interface AppState {
@@ -13,6 +22,8 @@ interface AppState {
   connectionMessage: string;
   configuration: BrokerConfiguration;
   upsertDrone: (drone: Drone) => void;
+  updateDroneTelemetry: (droneId: string, telemetry: DroneTelemetryUpdate) => void;
+  updateMavlinkStreamStatus: (systemId: number, status: MavlinkStreamStatus) => void;
   upsertTask: (task: DroneTask) => void;
   addEvent: (entry: Omit<EventLogEntry, 'id' | 'timestamp'>) => void;
   selectDrone: (droneId?: string) => void;
@@ -47,28 +58,122 @@ export const useAppStore = create<AppState>((set) => ({
   connected: false,
   connectionMessage: 'Disconnected',
   configuration: initialConfiguration,
-  upsertDrone: (drone) => set((state) => {
-    const existing = state.drones[drone.id];
-    return {
-      drones: {
-        ...state.drones,
-        [drone.id]: {
-          ...existing,
-          ...drone,
-          position: drone.position ?? existing?.position,
-          capabilities: drone.capabilities.length > 0 ? drone.capabilities : existing?.capabilities ?? [],
+
+  upsertDrone: (drone) =>
+    set((state) => {
+      const existing = state.drones[drone.id];
+
+      return {
+        drones: {
+          ...state.drones,
+          [drone.id]: {
+            ...existing,
+            ...drone,
+            position: drone.position ?? existing?.position,
+            capabilities: drone.capabilities.length > 0 ? drone.capabilities : existing?.capabilities ?? [],
+          },
         },
+      };
+    }),
+
+  updateDroneTelemetry: (droneId, telemetry) =>
+    set((state) => {
+      const existing = state.drones[droneId];
+
+      if (!existing) {
+        return state;
+      }
+
+      return {
+        drones: {
+          ...state.drones,
+          [droneId]: {
+            ...existing,
+            ...telemetry,
+            position: telemetry.position
+              ? {
+                  ...existing.position,
+                  ...telemetry.position,
+                }
+              : existing.position,
+          },
+        },
+      };
+    }),
+
+  updateMavlinkStreamStatus: (systemId, status) =>
+    set((state) => {
+      const matches = Object.values(state.drones).filter(
+        (drone) => drone.twin?.systemId === systemId,
+      );
+
+      if (matches.length !== 1) {
+        return state;
+      }
+
+      const drone = matches[0];
+
+      return {
+        drones: {
+          ...state.drones,
+          [drone.id]: {
+            ...drone,
+            mavlinkStreamStatus: status,
+          },
+        },
+      };
+    }),
+
+  upsertTask: (task) =>
+    set((state) => ({
+      tasks: {
+        ...state.tasks,
+        [task.id]: task,
       },
-    };
-  }),
-  upsertTask: (task) => set((state) => ({ tasks: { ...state.tasks, [task.id]: task } })),
-  addEvent: (entry) => set((state) => ({
-    events: [{ ...entry, id: createUuid(), timestamp: Date.now() }, ...state.events].slice(0, 100),
-  })),
-  selectDrone: (selectedDroneId) => set({ selectedDroneId, draftPoints: [] }),
-  selectTaskType: (taskType) => set({ taskType, draftPoints: [] }),
-  addDraftPoint: (point) => set({ draftPoints: [point] }),
-  clearDraftPoints: () => set({ draftPoints: [] }),
-  setConnection: (connected, connectionMessage) => set({ connected, connectionMessage }),
-  updateConfiguration: (configuration) => set({ configuration }),
+    })),
+
+  addEvent: (entry) =>
+    set((state) => ({
+      events: [
+        {
+          ...entry,
+          id: createUuid(),
+          timestamp: Date.now(),
+        },
+        ...state.events,
+      ].slice(0, 100),
+    })),
+
+  selectDrone: (selectedDroneId) =>
+    set({
+      selectedDroneId,
+      draftPoints: [],
+    }),
+
+  selectTaskType: (taskType) =>
+    set({
+      taskType,
+      draftPoints: [],
+    }),
+
+  addDraftPoint: (point) =>
+    set({
+      draftPoints: [point],
+    }),
+
+  clearDraftPoints: () =>
+    set({
+      draftPoints: [],
+    }),
+
+  setConnection: (connected, connectionMessage) =>
+    set({
+      connected,
+      connectionMessage,
+    }),
+
+  updateConfiguration: (configuration) =>
+    set({
+      configuration,
+    }),
 }));

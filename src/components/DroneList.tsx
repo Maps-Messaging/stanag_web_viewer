@@ -1,5 +1,16 @@
 import FlightIcon from '@mui/icons-material/Flight';
-import { Box, Chip, List, ListItemButton, ListItemIcon, ListItemText, Paper, Stack, Typography } from '@mui/material';
+import {
+  Box,
+  Chip,
+  List,
+  ListItemButton,
+  Paper,
+  Stack,
+  Typography,
+} from '@mui/material';
+import { useState } from 'react';
+import { AttitudeIndicator } from './AttitudeIndicator';
+import { DroneDetailsDialog } from './DroneDetailsDialog';
 import { useAppStore } from '../state/useAppStore';
 
 export function DroneList() {
@@ -7,33 +18,150 @@ export function DroneList() {
   const drones = Object.values(droneMap);
   const selectedDroneId = useAppStore((state) => state.selectedDroneId);
   const selectDrone = useAppStore((state) => state.selectDrone);
+  const [dialogDroneId, setDialogDroneId] = useState<string>();
+
+  const dialogDrone = dialogDroneId
+    ? droneMap[dialogDroneId]
+    : undefined;
+
+  function openDrone(droneId: string): void {
+    selectDrone(droneId);
+    setDialogDroneId(droneId);
+  }
 
   return (
-    <Paper square sx={{ height: '100%', overflow: 'auto' }}>
-      <Box sx={{ px: 2, py: 1.5 }}>
-        <Typography variant="overline">Drones</Typography>
-      </Box>
-      <List dense disablePadding>
-        {drones.map((drone) => (
-          <ListItemButton key={drone.id} selected={drone.id === selectedDroneId} onClick={() => selectDrone(drone.id)}>
-            <ListItemIcon><FlightIcon sx={{ transform: `rotate(${drone.heading}deg)` }} /></ListItemIcon>
-            <ListItemText
-              primary={drone.name}
-              secondary={drone.position
-                ? `${drone.position.altitude?.toFixed(1) ?? 0} m · ${drone.groundSpeed.toFixed(2)} m/s`
-                : 'Waiting for node status'}
-            />
-            <Stack direction="row" spacing={0.5}>
-              {drone.symbolSet && <Chip size="small" label={shortEnum(drone.symbolSet)} />}
-              <Chip size="small" label={drone.position ? 'LIVE' : 'KNOWN'} color={drone.position ? 'success' : 'default'} />
-            </Stack>
-          </ListItemButton>
-        ))}
-      </List>
-    </Paper>
+    <>
+      <Paper square sx={{ height: '100%', overflow: 'auto' }}>
+        <Box sx={{ px: 2, py: 1.5 }}>
+          <Typography variant="overline">Drones</Typography>
+        </Box>
+
+        <List disablePadding>
+          {drones.map((drone) => (
+            <ListItemButton
+              key={drone.id}
+              selected={drone.id === selectedDroneId}
+              onClick={() => openDrone(drone.id)}
+              sx={{
+                alignItems: 'center',
+                gap: 1.25,
+                py: 1.25,
+              }}
+            >
+              <AttitudeIndicator
+                rollDegrees={drone.roll}
+                pitchDegrees={drone.pitch}
+              />
+
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography variant="body2" noWrap>
+                  {drone.name}
+                </Typography>
+
+                <Stack
+                  direction="row"
+                  spacing={0.75}
+                  alignItems="center"
+                  sx={{ mt: 0.4 }}
+                >
+                  <FlightIcon
+                    fontSize="small"
+                    sx={{
+                      transform: `rotate(${drone.heading}deg)`,
+                      color: 'text.secondary',
+                    }}
+                  />
+
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                  >
+                    {formatHeading(drone.heading)}
+                  </Typography>
+                </Stack>
+
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  useFlexGap
+                  flexWrap="wrap"
+                  sx={{ mt: 0.75 }}
+                >
+                  {drone.symbolSet && (
+                    <Chip
+                      size="small"
+                      label={shortEnum(drone.symbolSet)}
+                    />
+                  )}
+
+                  <Chip
+                    size="small"
+                    label={drone.position ? 'LIVE' : 'KNOWN'}
+                    color={drone.position ? 'success' : 'default'}
+                  />
+
+                  <Chip
+                    size="small"
+                    label={streamStatusLabel(drone.mavlinkStreamStatus?.status)}
+                    color={streamStatusColor(drone.mavlinkStreamStatus?.status)}
+                    variant={drone.mavlinkStreamStatus ? 'filled' : 'outlined'}
+                  />
+                </Stack>
+              </Box>
+            </ListItemButton>
+          ))}
+        </List>
+      </Paper>
+
+      <DroneDetailsDialog
+        drone={dialogDrone}
+        open={dialogDrone !== undefined}
+        onClose={() => setDialogDroneId(undefined)}
+      />
+    </>
   );
 }
 
+function formatHeading(value: number): string {
+  const heading = (value % 360 + 360) % 360;
+  return `${heading.toFixed(1)}°`;
+}
+
 function shortEnum(value: string): string {
-  return value.replace(/^.*Enum_/, '').replaceAll('_', ' ');
+  return value
+    .replace(/^.*Enum_/, '')
+    .replaceAll('_', ' ');
+}
+
+
+function streamStatusLabel(status: string | undefined): string {
+  switch (status) {
+    case 'OK':
+      return 'UDP OK';
+    case 'INITIAL':
+      return 'UDP INITIAL';
+    case 'LOSS':
+      return 'UDP LOSS';
+    case 'RESET':
+      return 'UDP RESET';
+    case 'OUT_OF_ORDER':
+      return 'UDP ORDER';
+    default:
+      return 'UDP UNKNOWN';
+  }
+}
+
+function streamStatusColor(status: string | undefined): 'default' | 'success' | 'warning' | 'error' {
+  switch (status) {
+    case 'OK':
+      return 'success';
+    case 'INITIAL':
+    case 'RESET':
+    case 'OUT_OF_ORDER':
+      return 'warning';
+    case 'LOSS':
+      return 'error';
+    default:
+      return 'default';
+  }
 }

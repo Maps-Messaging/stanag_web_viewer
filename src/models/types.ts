@@ -7,10 +7,138 @@ export interface GeoPoint {
   altitudeType?: string;
 }
 
+
+export type MavlinkSequenceStatus =
+  | 'INITIAL'
+  | 'OK'
+  | 'LOSS'
+  | 'RESET'
+  | 'OUT_OF_ORDER';
+
+export interface MavlinkStreamStatus {
+  previousSequenceNumber: number;
+  currentSequenceNumber: number;
+  expectedSequenceNumber: number;
+  delta: number;
+  lostPackets: number;
+  timestamp: number;
+  statusChanged: boolean;
+  status: MavlinkSequenceStatus;
+}
+
 export interface DroneCapability {
   taskType: string;
   taskSpecialization: string;
   authorities: string[];
+}
+
+export interface TwinOrientation {
+  rollDegrees?: number;
+  pitchDegrees?: number;
+  yawDegrees?: number;
+}
+
+export interface TwinGeoPosition {
+  latitude?: number;
+  longitude?: number;
+  altitudeMslMeters?: number;
+}
+
+export interface TwinHomePosition {
+  latitude?: number;
+  longitude?: number;
+  altitudeMslMeters?: number;
+}
+
+export interface TwinVelocityVector {
+  northMetersPerSecond?: number;
+  eastMetersPerSecond?: number;
+  downMetersPerSecond?: number;
+}
+
+export interface TwinFixInfo {
+  fixType?: string;
+  satelliteCount?: number;
+  hdop?: number;
+  vdop?: number;
+}
+
+export interface TwinBatteryState {
+  percentage?: number;
+  voltageVolts?: number;
+  currentAmps?: number;
+  charging?: boolean;
+  duration?: string;
+}
+
+export interface TwinLinkState {
+  state?: string;
+  connected?: boolean;
+}
+
+export interface TwinSystemState {
+  cpuLoadPercent?: number;
+  healthy?: boolean;
+  statusMessage?: string;
+}
+
+export interface TwinAutopilotState {
+  modeNumber?: number;
+  autopilotType?: string;
+  baseMode?: number;
+  customMode?: number;
+  systemStatus?: number;
+  mavlinkVersion?: number;
+}
+
+export interface TwinState {
+  uuid?: string;
+  twinId?: string;
+  twinType?: string;
+  displayName?: string;
+  callSign?: string;
+  modelName?: string;
+  vehicleClass?: string;
+  systemId?: number;
+  componentId?: number;
+  mmsi?: number;
+  descriptionString?: string;
+  armed?: boolean;
+  flightMode?: string;
+  gpsValid?: boolean;
+  missionState?: string;
+  landedState?: string;
+  vtolState?: string;
+  lifecycleStatus?: string;
+  readinessState?: string;
+  registrationReady?: boolean;
+  commandReady?: boolean;
+  missingReadinessItems?: string[];
+  degradedReadinessItems?: string[];
+  blockingReadinessItems?: string[];
+  headingDegrees?: number;
+  groundSpeedMetersPerSecond?: number;
+  verticalSpeedMetersPerSecond?: number;
+  batteryCapacityHours?: number;
+  stopAction?: string;
+  operationalUpdatedAt?: string;
+  readinessUpdatedAt?: string;
+  lastSeenAt?: string;
+  validTill?: string;
+  geoPosition?: TwinGeoPosition;
+  homePosition?: TwinHomePosition;
+  velocityVector?: TwinVelocityVector;
+  orientation?: TwinOrientation;
+  fixInfo?: TwinFixInfo;
+  batteryState?: TwinBatteryState;
+  linkState?: TwinLinkState;
+  systemState?: TwinSystemState;
+  autopilotState?: TwinAutopilotState;
+  capabilities?: unknown;
+  description?: unknown;
+  relationships?: unknown[];
+  attributes?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export interface Drone {
@@ -32,6 +160,7 @@ export interface Drone {
   heading: number;
   roll?: number;
   pitch?: number;
+  yaw?: number;
   groundSpeed: number;
   course?: number;
   climbRate?: number;
@@ -41,6 +170,22 @@ export interface Drone {
   initiatedAt?: number;
   lastSeen: number;
   activeTaskId?: string;
+  twin?: TwinState;
+  mavlinkStreamStatus?: MavlinkStreamStatus;
+}
+
+export interface DroneTelemetryUpdate {
+  position?: GeoPoint;
+  heading?: number;
+  roll?: number;
+  pitch?: number;
+  yaw?: number;
+  groundSpeed?: number;
+  course?: number;
+  climbRate?: number;
+  lastSeen?: number;
+  twin?: TwinState;
+  mavlinkStreamStatus?: MavlinkStreamStatus;
 }
 
 export type TaskType = 'REPOSITION' | 'LOITER';
