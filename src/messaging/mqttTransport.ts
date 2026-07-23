@@ -85,24 +85,29 @@ export class MqttTransport implements MessageTransport {
   async cancelTask(task: DroneTask): Promise<void> {
     await this.publish(task, buildTaskAdminCancel(this.configuration, task));
   }
-
   private async publish(task: DroneTask, payload: unknown): Promise<void> {
     if (!this.client?.connected) {
       throw new Error('MQTT client is not connected');
     }
 
+    const drone = useAppStore.getState().drones[task.droneId];
+
+    if (!drone) {
+      throw new Error(`Unknown drone ${task.droneId}`);
+    }
+
     const topic = resolveTaskAdminDestination(
-      this.configuration.taskAdminTopic,
-      task.droneId,
+        this.configuration.taskAdminTopic,
+        drone.name,
     );
 
     await this.client.publishAsync(
-      topic,
-      JSON.stringify(payload),
-      {
-        qos: 1,
-        retain: false,
-      },
+        topic,
+        JSON.stringify(payload),
+        {
+          qos: 1,
+          retain: false,
+        },
     );
   }
 

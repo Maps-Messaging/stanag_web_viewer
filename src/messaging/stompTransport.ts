@@ -143,9 +143,15 @@ export class StompTransport implements MessageTransport {
       throw new Error('STOMP client is not connected');
     }
 
+    const drone = useAppStore.getState().drones[task.droneId];
+
+    if (!drone) {
+      throw new Error(`Unknown drone ${task.droneId}`);
+    }
+
     const destination = resolveTaskAdminDestination(
-      this.configuration.taskAdminTopic,
-      task.droneId,
+        this.configuration.taskAdminTopic,
+        drone.name,
     );
 
     this.client.publish({
