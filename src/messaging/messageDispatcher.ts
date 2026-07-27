@@ -9,11 +9,15 @@ export function dispatchStanagMessage(payload: unknown): void {
   if (messageType === 'MessageTypeEnum_NODE_DESCRIPTION' || messageType === 'MessageTypeEnum_NODE_STATUS') {
     const node = parseNodeMessage(payload);
     store.upsertDrone(node.drone);
-    store.addEvent({
-      level: 'INFO',
-      message: `${node.messageType}: ${node.drone.name}`,
-      payload,
-    });
+
+    if (messageType === 'MessageTypeEnum_NODE_DESCRIPTION') {
+      store.addEvent({
+        level: 'INFO',
+        message: `${node.messageType}: ${node.drone.name}`,
+        payload,
+      });
+    }
+
     return;
   }
 
@@ -170,7 +174,6 @@ function numberValue(value: unknown): number | undefined {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-
 
 export function dispatchMavlinkStreamStatus(systemId: number, payload: unknown): void {
   if (!Number.isInteger(systemId) || systemId < 1 || systemId > 255 || !isRecord(payload)) {

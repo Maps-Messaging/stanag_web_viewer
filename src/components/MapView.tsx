@@ -19,19 +19,19 @@ export function MapView() {
   const markersRef = useRef<globalThis.Map<string, maplibregl.Marker>>(new globalThis.Map());
   const droneTracksRef = useRef<globalThis.Map<string, GeoPoint[]>>(new globalThis.Map());
   const taskPopupRef = useRef<maplibregl.Popup | undefined>(undefined);
-  const drones = useAppStore((state) => state.drones);
+  const droneRenderFrameRef = useRef<number | undefined>(undefined);
+  const pendingDroneIdsRef = useRef<Set<string>>(new Set());
+  const droneSourcesDirtyRef = useRef(false);
   const tasks = useAppStore((state) => state.tasks);
-  const selectedDroneId = useAppStore((state) => state.selectedDroneId);
-  const selectDrone = useAppStore((state) => state.selectDrone);
   const taskType = useAppStore((state) => state.taskType);
   const draftPoints = useAppStore((state) => state.draftPoints);
-  const addDraftPoint = useAppStore((state) => state.addDraftPoint);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) {
       return;
     }
 
+    let mapLoaded = false;
     const map = new maplibregl.Map({
       container: containerRef.current,
       center: [24.829501, 59.467137],
@@ -43,11 +43,94 @@ export function MapView() {
             type: 'raster',
             tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
             tileSize: 256,
-            attribution: 'Â© OpenStreetMap contributors',
+            attribution: '© OpenStreetMap contributors',
           },
         },
         layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
       },
+    });
+
+    const renderPendingDrones = () => {
+      droneRenderFrameRef.current = undefined;
+
+      if (!mapLoaded) {
+        return;
+      }
+
+      const state = useAppStore.getState();
+      const changedDroneIds = Array.from(pendingDroneIdsRef.current);
+      const updateSources = droneSourcesDirtyRef.current;
+      pendingDroneIdsRef.current.clear();
+      droneSourcesDirtyRef.current = false;
+
+      updateDroneMarkers(
+        map,
+        state.drones,
+        state.selectedDroneId,
+        changedDroneIds,
+        markersRef.current,
+        droneTracksRef.current,
+      );
+
+      if (updateSources) {
+        updateDroneTrackSource(map, droneTracksRef.current);
+        updateDroneMovementSource(map, Object.values(state.drones));
+      }
+    };
+
+    const scheduleDroneRender = () => {
+      if (droneRenderFrameRef.current !== undefined) {
+        return;
+      }
+
+      droneRenderFrameRef.current = globalThis.requestAnimationFrame(
+        renderPendingDrones,
+      );
+    };
+
+    const queueAllDrones = () => {
+      Object.keys(useAppStore.getState().drones).forEach(
+        (droneId) => pendingDroneIdsRef.current.add(droneId),
+      );
+      droneSourcesDirtyRef.current = true;
+      scheduleDroneRender();
+    };
+
+    const unsubscribe = useAppStore.subscribe((state, previousState) => {
+      let renderRequired = false;
+
+      if (state.drones !== previousState.drones) {
+        Object.keys(state.drones).forEach((droneId) => {
+          if (state.drones[droneId] !== previousState.drones[droneId]) {
+            pendingDroneIdsRef.current.add(droneId);
+          }
+        });
+
+        Object.keys(previousState.drones).forEach((droneId) => {
+          if (!state.drones[droneId]) {
+            pendingDroneIdsRef.current.add(droneId);
+          }
+        });
+
+        droneSourcesDirtyRef.current = true;
+        renderRequired = true;
+      }
+
+      if (state.selectedDroneId !== previousState.selectedDroneId) {
+        if (previousState.selectedDroneId) {
+          pendingDroneIdsRef.current.add(previousState.selectedDroneId);
+        }
+
+        if (state.selectedDroneId) {
+          pendingDroneIdsRef.current.add(state.selectedDroneId);
+        }
+
+        renderRequired = true;
+      }
+
+      if (renderRequired) {
+        scheduleDroneRender();
+      }
     });
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -126,6 +209,7 @@ export function MapView() {
 
       map.on('click', 'task-points', (event) => {
         const feature = event.features?.[0];
+
         if (!feature) {
           return;
         }
@@ -136,6 +220,7 @@ export function MapView() {
 
       map.on('click', 'task-volume-fill', (event) => {
         const feature = event.features?.[0];
+
         if (!feature) {
           return;
         }
@@ -169,14 +254,28 @@ export function MapView() {
           return;
         }
 
-        addDraftPoint({ latitude: event.lngLat.lat, longitude: event.lngLat.lng });
+        useAppStore.getState().addDraftPoint({
+          latitude: event.lngLat.lat,
+          longitude: event.lngLat.lng,
+        });
       });
 
+      mapLoaded = true;
+      queueAllDrones();
     });
 
     mapRef.current = map;
 
     return () => {
+      unsubscribe();
+
+      if (droneRenderFrameRef.current !== undefined) {
+        globalThis.cancelAnimationFrame(droneRenderFrameRef.current);
+        droneRenderFrameRef.current = undefined;
+      }
+
+      pendingDroneIdsRef.current.clear();
+      droneSourcesDirtyRef.current = false;
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current.clear();
       taskPopupRef.current?.remove();
@@ -185,75 +284,18 @@ export function MapView() {
       map.remove();
       mapRef.current = undefined;
     };
-  }, [addDraftPoint]);
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) {
-      return;
-    }
 
-    const visibleDroneIds = new Set(Object.values(drones).filter((drone) => drone.position).map((drone) => drone.id));
-
-    markersRef.current.forEach((marker, droneId) => {
-      if (!visibleDroneIds.has(droneId)) {
-        marker.remove();
-        markersRef.current.delete(droneId);
-      }
-    });
-
-    Object.values(drones).forEach((drone) => {
-      if (!drone.position) {
-        return;
-      }
-
-      appendTrackPoint(droneTracksRef.current, drone.id, drone.position);
-
-      const existing = markersRef.current.get(drone.id);
-      const popupContent = buildDronePopup(drone);
-
-      if (existing) {
-        existing.setLngLat([drone.position.longitude, drone.position.latitude]);
-        existing.setRotation(drone.heading);
-        existing.getElement().dataset.selected = String(drone.id === selectedDroneId);
-        existing.getPopup()?.setDOMContent(popupContent);
-        return;
-      }
-
-      const element = document.createElement('button');
-      element.className = 'drone-marker';
-      element.type = 'button';
-      element.title = drone.name;
-      element.dataset.selected = String(drone.id === selectedDroneId);
-      element.innerHTML = '▲';
-      const popup = new maplibregl.Popup({ offset: 20, closeButton: true, maxWidth: '340px' }).setDOMContent(popupContent);
-
-      const marker = new maplibregl.Marker({ element, rotationAlignment: 'map', rotation: drone.heading })
-          .setLngLat([drone.position.longitude, drone.position.latitude])
-          .setPopup(popup)
-          .addTo(map);
-
-      element.addEventListener('click', (event) => {
-        event.stopImmediatePropagation();
-        selectDrone(drone.id);
-        marker.togglePopup();
-      });
-
-      markersRef.current.set(drone.id, marker);
-    });
-
-    updateDroneTrackSource(map, droneTracksRef.current);
-    updateDroneMovementSource(map, Object.values(drones));
-  }, [drones, selectedDroneId, selectDrone]);
-
-  useEffect(() => {
-    const map = mapRef.current;
     if (!map) {
       return;
     }
 
     const updateGeometry = () => {
       const source = map.getSource(TASK_GEOMETRY_SOURCE) as GeoJSONSource | undefined;
+
       if (!source) {
         return;
       }
@@ -274,161 +316,230 @@ export function MapView() {
   return <div ref={containerRef} className="map-container" />;
 }
 
+function updateDroneMarkers(
+  map: MapLibreMap,
+  drones: Record<string, Drone>,
+  selectedDroneId: string | undefined,
+  changedDroneIds: string[],
+  markers: globalThis.Map<string, maplibregl.Marker>,
+  tracks: globalThis.Map<string, GeoPoint[]>,
+): void {
+  changedDroneIds.forEach((droneId) => {
+    const drone = drones[droneId];
+    const existing = markers.get(droneId);
+
+    if (!drone?.position) {
+      existing?.remove();
+      markers.delete(droneId);
+      tracks.delete(droneId);
+      return;
+    }
+
+    appendTrackPoint(tracks, drone.id, drone.position);
+
+    if (existing) {
+      existing.setLngLat([drone.position.longitude, drone.position.latitude]);
+      existing.setRotation(drone.heading);
+      existing.getElement().title = drone.name;
+      existing.getElement().dataset.selected = String(drone.id === selectedDroneId);
+
+      const popup = existing.getPopup();
+
+      if (popup?.isOpen()) {
+        popup.setDOMContent(buildDronePopup(drone));
+      }
+
+      return;
+    }
+
+    markers.set(
+      drone.id,
+      createDroneMarker(map, drone, drone.id === selectedDroneId),
+    );
+  });
+}
+
+function createDroneMarker(
+  map: MapLibreMap,
+  drone: Drone,
+  selected: boolean,
+): maplibregl.Marker {
+  const element = document.createElement('button');
+  element.className = 'drone-marker';
+  element.type = 'button';
+  element.title = drone.name;
+  element.dataset.selected = String(selected);
+  element.innerHTML = '▲';
+
+  const popup = new maplibregl.Popup({
+    offset: 20,
+    closeButton: true,
+    maxWidth: '340px',
+  }).setText(drone.name);
+
+  popup.on('open', () => {
+    const currentDrone = useAppStore.getState().drones[drone.id];
+
+    if (currentDrone) {
+      popup.setDOMContent(buildDronePopup(currentDrone));
+    }
+  });
+
+  const marker = new maplibregl.Marker({
+    element,
+    rotationAlignment: 'map',
+    rotation: drone.heading,
+  })
+    .setLngLat([drone.position!.longitude, drone.position!.latitude])
+    .setPopup(popup)
+    .addTo(map);
+
+  element.addEventListener('click', (event) => {
+    event.stopPropagation();
+    useAppStore.getState().selectDrone(drone.id);
+  });
+
+  return marker;
+}
 
 function appendTrackPoint(
-    tracks: globalThis.Map<string, GeoPoint[]>,
-    droneId: string,
-    point: GeoPoint,
+  tracks: globalThis.Map<string, GeoPoint[]>,
+  droneId: string,
+  point: GeoPoint,
 ): void {
   const existing = tracks.get(droneId) ?? [];
   const previous = existing.at(-1);
 
   if (
-      previous
-      && previous.latitude === point.latitude
-      && previous.longitude === point.longitude
+    previous
+    && previous.latitude === point.latitude
+    && previous.longitude === point.longitude
   ) {
     return;
   }
 
   tracks.set(
-      droneId,
-      [
-        ...existing,
-        {
-          latitude: point.latitude,
-          longitude: point.longitude,
-          altitude: point.altitude,
-        },
-      ].slice(-MAX_TRACK_POINTS),
+    droneId,
+    [
+      ...existing,
+      {
+        latitude: point.latitude,
+        longitude: point.longitude,
+        altitude: point.altitude,
+      },
+    ].slice(-MAX_TRACK_POINTS),
   );
 }
 
 function updateDroneTrackSource(
-    map: MapLibreMap,
-    tracks: globalThis.Map<string, GeoPoint[]>,
+  map: MapLibreMap,
+  tracks: globalThis.Map<string, GeoPoint[]>,
 ): void {
-  const update = () => {
-    const source = map.getSource(DRONE_TRACK_SOURCE) as GeoJSONSource | undefined;
+  const source = map.getSource(DRONE_TRACK_SOURCE) as GeoJSONSource | undefined;
 
-    if (!source) {
+  if (!source) {
+    return;
+  }
+
+  const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+
+  tracks.forEach((points, droneId) => {
+    if (points.length < 2) {
       return;
     }
 
-    const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-
-    tracks.forEach((points, droneId) => {
-      if (points.length < 2) {
-        return;
-      }
-
-      features.push({
-        type: 'Feature',
-        properties: {
-          droneId,
-          pointCount: points.length,
-        },
-        geometry: {
-          type: 'LineString',
-          coordinates: points.map((point) => [
-            point.longitude,
-            point.latitude,
-          ]),
-        },
-      });
+    features.push({
+      type: 'Feature',
+      properties: {
+        droneId,
+        pointCount: points.length,
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: points.map((point) => [
+          point.longitude,
+          point.latitude,
+        ]),
+      },
     });
+  });
 
-    source.setData({
-      type: 'FeatureCollection',
-      features,
-    });
-  };
-
-  if (map.isStyleLoaded()) {
-    update();
-  } else {
-    map.once('load', update);
-  }
+  source.setData({
+    type: 'FeatureCollection',
+    features,
+  });
 }
 
 function updateDroneMovementSource(
-    map: MapLibreMap,
-    drones: Drone[],
+  map: MapLibreMap,
+  drones: Drone[],
 ): void {
-  const update = () => {
-    const source = map.getSource(DRONE_MOVEMENT_SOURCE) as GeoJSONSource | undefined;
+  const source = map.getSource(DRONE_MOVEMENT_SOURCE) as GeoJSONSource | undefined;
 
-    if (!source) {
-      return;
-    }
-
-    source.setData({
-      type: 'FeatureCollection',
-      features: buildDroneMovementFeatures(drones),
-    });
-  };
-
-  if (map.isStyleLoaded()) {
-    update();
-  } else {
-    map.once('load', update);
+  if (!source) {
+    return;
   }
+
+  source.setData({
+    type: 'FeatureCollection',
+    features: buildDroneMovementFeatures(drones),
+  });
 }
 
 function buildDroneMovementFeatures(
-    drones: Drone[],
+  drones: Drone[],
 ): GeoJSON.Feature<GeoJSON.LineString>[] {
   return drones
-      .filter(
-          (drone) =>
-              drone.position
-              && drone.groundSpeed >= MIN_VISIBLE_SPEED_METRES_PER_SECOND,
-      )
-      .map((drone) => {
-        const distanceMeters = Math.min(
-            MAX_MOVEMENT_LINE_METRES,
-            Math.max(
-                MIN_MOVEMENT_LINE_METRES,
-                drone.groundSpeed * MOVEMENT_LINE_METRES_PER_METRE_PER_SECOND,
-            ),
-        );
+    .filter(
+      (drone) =>
+        drone.position
+        && drone.groundSpeed >= MIN_VISIBLE_SPEED_METRES_PER_SECOND,
+    )
+    .map((drone) => {
+      const distanceMeters = Math.min(
+        MAX_MOVEMENT_LINE_METRES,
+        Math.max(
+          MIN_MOVEMENT_LINE_METRES,
+          drone.groundSpeed * MOVEMENT_LINE_METRES_PER_METRE_PER_SECOND,
+        ),
+      );
 
-        const course = drone.course ?? drone.heading;
-        const destination = destinationPoint(
-            drone.position!,
-            course,
-            distanceMeters,
-        );
+      const course = drone.course ?? drone.heading;
+      const destination = destinationPoint(
+        drone.position!,
+        course,
+        distanceMeters,
+      );
 
-        return {
-          type: 'Feature',
-          properties: {
-            droneId: drone.id,
-            speed: drone.groundSpeed,
-            course,
-            distanceMeters,
-          },
-          geometry: {
-            type: 'LineString',
-            coordinates: [
-              [
-                drone.position!.longitude,
-                drone.position!.latitude,
-              ],
-              [
-                destination.longitude,
-                destination.latitude,
-              ],
+      return {
+        type: 'Feature',
+        properties: {
+          droneId: drone.id,
+          speed: drone.groundSpeed,
+          course,
+          distanceMeters,
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [
+              drone.position!.longitude,
+              drone.position!.latitude,
             ],
-          },
-        };
-      });
+            [
+              destination.longitude,
+              destination.latitude,
+            ],
+          ],
+        },
+      };
+    });
 }
 
 function destinationPoint(
-    start: GeoPoint,
-    bearingDegrees: number,
-    distanceMeters: number,
+  start: GeoPoint,
+  bearingDegrees: number,
+  distanceMeters: number,
 ): GeoPoint {
   const earthRadiusMeters = 6_371_008.8;
   const angularDistance = distanceMeters / earthRadiusMeters;
@@ -437,19 +548,19 @@ function destinationPoint(
   const longitude = start.longitude * Math.PI / 180;
 
   const destinationLatitude = Math.asin(
-      Math.sin(latitude) * Math.cos(angularDistance)
-      + Math.cos(latitude)
-      * Math.sin(angularDistance)
-      * Math.cos(bearing),
+    Math.sin(latitude) * Math.cos(angularDistance)
+    + Math.cos(latitude)
+    * Math.sin(angularDistance)
+    * Math.cos(bearing),
   );
 
   const destinationLongitude = longitude + Math.atan2(
-      Math.sin(bearing)
-      * Math.sin(angularDistance)
-      * Math.cos(latitude),
-      Math.cos(angularDistance)
-      - Math.sin(latitude)
-      * Math.sin(destinationLatitude),
+    Math.sin(bearing)
+    * Math.sin(angularDistance)
+    * Math.cos(latitude),
+    Math.cos(angularDistance)
+    - Math.sin(latitude)
+    * Math.sin(destinationLatitude),
   );
 
   return {
@@ -460,10 +571,10 @@ function destinationPoint(
 }
 
 function showTaskPopup(
-    map: MapLibreMap,
-    lngLat: maplibregl.LngLat,
-    properties: Record<string, unknown>,
-    popupRef: MutableRefObject<maplibregl.Popup | undefined>,
+  map: MapLibreMap,
+  lngLat: maplibregl.LngLat,
+  properties: Record<string, unknown>,
+  popupRef: MutableRefObject<maplibregl.Popup | undefined>,
 ): void {
   popupRef.current?.remove();
 
@@ -499,9 +610,9 @@ function showTaskPopup(
   root.appendChild(table);
 
   popupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '320px' })
-      .setLngLat(lngLat)
-      .setDOMContent(root)
-      .addTo(map);
+    .setLngLat(lngLat)
+    .setDOMContent(root)
+    .addTo(map);
 }
 
 function buildDronePopup(drone: Drone): HTMLElement {
@@ -521,7 +632,7 @@ function buildDronePopup(drone: Drone): HTMLElement {
   addPopupRow(table, 'Latitude', drone.position?.latitude.toFixed(7) ?? 'Unknown');
   addPopupRow(table, 'Longitude', drone.position?.longitude.toFixed(7) ?? 'Unknown');
   addPopupRow(table, 'Altitude', formatMeasurement(drone.position?.altitude, 'm'));
-  addPopupRow(table, 'Heading', `${drone.heading.toFixed(1)}Â°`);
+  addPopupRow(table, 'Heading', `${drone.heading.toFixed(1)}°`);
   addPopupRow(table, 'Speed', formatMeasurement(drone.groundSpeed, 'm/s'));
   addPopupRow(table, 'Climb rate', formatMeasurement(drone.climbRate, 'm/s'));
   addPopupRow(table, 'Organisation', drone.organization ?? 'Unknown');
@@ -552,27 +663,27 @@ function buildTaskFeatures(tasks: DroneTask[], draftPoints: GeoPoint[], taskType
   }
 
   tasks
-      .filter((task) => task.state !== 'COMPLETED' && task.state !== 'CANCELLED')
-      .forEach((task) => {
-        features.push(pointFeature(task.point, 'task', `${task.type} target`, task.id, task.type, task.state, task.percentComplete, task.radiusMeters));
+    .filter((task) => task.state !== 'COMPLETED' && task.state !== 'CANCELLED')
+    .forEach((task) => {
+      features.push(pointFeature(task.point, 'task', `${task.type} target`, task.id, task.type, task.state, task.percentComplete, task.radiusMeters));
 
-        if (task.geometryType === 'CIRCLE' && task.radiusMeters && task.radiusMeters > 0) {
-          features.push(circleFeature(task.point, task.radiusMeters, task));
-        }
-      });
+      if (task.geometryType === 'CIRCLE' && task.radiusMeters && task.radiusMeters > 0) {
+        features.push(circleFeature(task.point, task.radiusMeters, task));
+      }
+    });
 
   return features;
 }
 
 function pointFeature(
-    point: GeoPoint,
-    kind: 'draft' | 'task',
-    label: string,
-    taskId?: string,
-    taskType?: string,
-    state?: string,
-    percentComplete?: number,
-    radiusMeters?: number,
+  point: GeoPoint,
+  kind: 'draft' | 'task',
+  label: string,
+  taskId?: string,
+  taskType?: string,
+  state?: string,
+  percentComplete?: number,
+  radiusMeters?: number,
 ): GeoJSON.Feature<GeoJSON.Point> {
   return {
     type: 'Feature',
@@ -605,12 +716,12 @@ function circleFeature(centre: GeoPoint, radiusMeters: number, task: DroneTask):
   for (let index = 0; index <= 64; index += 1) {
     const bearing = index / 64 * Math.PI * 2;
     const latitude = Math.asin(
-        Math.sin(latitudeRadians) * Math.cos(angularDistance)
-        + Math.cos(latitudeRadians) * Math.sin(angularDistance) * Math.cos(bearing),
+      Math.sin(latitudeRadians) * Math.cos(angularDistance)
+      + Math.cos(latitudeRadians) * Math.sin(angularDistance) * Math.cos(bearing),
     );
     const longitude = longitudeRadians + Math.atan2(
-        Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latitudeRadians),
-        Math.cos(angularDistance) - Math.sin(latitudeRadians) * Math.sin(latitude),
+      Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latitudeRadians),
+      Math.cos(angularDistance) - Math.sin(latitudeRadians) * Math.sin(latitude),
     );
 
     coordinates.push([longitude * 180 / Math.PI, latitude * 180 / Math.PI]);
