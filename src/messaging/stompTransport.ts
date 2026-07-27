@@ -15,14 +15,13 @@ import type { MessageTransport } from './transport';
 
 const TWIN_TOPIC = '/state/twins/+';
 const MAVLINK_STATUS_TOPIC = '/mavlink/+/status';
-const TWIN_UPDATE_MINIMUM_INTERVAL_MILLIS = 100;
 const MAVLINK_STATUS_DESTINATION_PATTERN = /^\/mavlink\/(\d+)\/status$/;
 
 export class StompTransport implements MessageTransport {
   private client?: Client;
-  private twinSubscription?: StompSubscription;
-  private mavlinkStatusSubscription?: StompSubscription;
-  private readonly lastTwinProcessedAt = new Map<string, number>();
+  private subscriptions: StompSubscription[] = [];
+  private readonly pendingTwinMessages = new Map<string, IMessage>();
+  private twinFlushFrame?: number;
 
   constructor(private readonly configuration: BrokerConfiguration) {}
 
@@ -39,6 +38,7 @@ export class StompTransport implements MessageTransport {
         reconnectDelay: 2000,
 
         onConnect: () => {
+          this.subscriptions = [];
           this.subscribeToStanag();
           this.subscribeToTwins();
           this.subscribeToMavlinkStatus();
@@ -52,6 +52,8 @@ export class StompTransport implements MessageTransport {
         },
 
         onWebSocketClose: () => {
+          this.subscriptions = [];
+          this.clearPendingTwinMessages();
           store.setConnection(false, 'STOMP disconnected');
         },
 
@@ -74,13 +76,8 @@ export class StompTransport implements MessageTransport {
   }
 
   async disconnect(): Promise<void> {
-    this.twinSubscription?.unsubscribe();
-    this.twinSubscription = undefined;
-
-    this.mavlinkStatusSubscription?.unsubscribe();
-    this.mavlinkStatusSubscription = undefined;
-
-    this.lastTwinProcessedAt.clear();
+    this.unsubscribeAll();
+    this.clearPendingTwinMessages();
 
     await this.client?.deactivate();
     this.client = undefined;
@@ -97,17 +94,13 @@ export class StompTransport implements MessageTransport {
   }
 
   private subscribeToStanag(): void {
-    if (!this.client?.connected) {
-      return;
-    }
-
-    this.client.subscribe(
+    this.subscribe(
       this.configuration.droneTopic,
       (message) => this.handleStanagMessage(message),
     );
 
     if (this.configuration.taskStatusTopic) {
-      this.client.subscribe(
+      this.subscribe(
         this.configuration.taskStatusTopic,
         (message) => this.handleStanagMessage(message),
       );
@@ -115,27 +108,33 @@ export class StompTransport implements MessageTransport {
   }
 
   private subscribeToTwins(): void {
-    if (!this.client?.connected) {
-      return;
-    }
-
-    this.twinSubscription?.unsubscribe();
-    this.twinSubscription = this.client.subscribe(
+    this.subscribe(
       TWIN_TOPIC,
       (message) => this.handleTwinMessage(message),
     );
   }
 
   private subscribeToMavlinkStatus(): void {
+    this.subscribe(
+      MAVLINK_STATUS_TOPIC,
+      (message) => this.handleMavlinkStatus(message),
+    );
+  }
+
+  private subscribe(destination: string, handler: (message: IMessage) => void): void {
     if (!this.client?.connected) {
       return;
     }
 
-    this.mavlinkStatusSubscription?.unsubscribe();
-    this.mavlinkStatusSubscription = this.client.subscribe(
-      MAVLINK_STATUS_TOPIC,
-      (message) => this.handleMavlinkStatus(message),
-    );
+    this.subscriptions.push(this.client.subscribe(destination, handler));
+  }
+
+  private unsubscribeAll(): void {
+    if (this.client?.connected) {
+      this.subscriptions.forEach((subscription) => subscription.unsubscribe());
+    }
+
+    this.subscriptions = [];
   }
 
   private publish(task: DroneTask, payload: unknown): void {
@@ -150,8 +149,8 @@ export class StompTransport implements MessageTransport {
     }
 
     const destination = resolveTaskAdminDestination(
-        this.configuration.taskAdminTopic,
-        drone.name,
+      this.configuration.taskAdminTopic,
+      drone.name,
     );
 
     this.client.publish({
@@ -169,19 +168,40 @@ export class StompTransport implements MessageTransport {
 
   private handleTwinMessage(message: IMessage): void {
     const destination = message.headers.destination ?? TWIN_TOPIC;
+    this.pendingTwinMessages.set(destination, message);
 
-    if (!this.shouldProcessTwin(destination)) {
+    if (this.twinFlushFrame !== undefined) {
       return;
     }
 
-    this.parse(message, dispatchTwinMessage);
+    this.twinFlushFrame = globalThis.requestAnimationFrame(
+      () => this.flushPendingTwinMessages(),
+    );
+  }
+
+  private flushPendingTwinMessages(): void {
+    this.twinFlushFrame = undefined;
+
+    const messages = Array.from(this.pendingTwinMessages.values());
+    this.pendingTwinMessages.clear();
+
+    messages.forEach((message) => this.parse(message, dispatchTwinMessage));
+  }
+
+  private clearPendingTwinMessages(): void {
+    if (this.twinFlushFrame !== undefined) {
+      globalThis.cancelAnimationFrame(this.twinFlushFrame);
+      this.twinFlushFrame = undefined;
+    }
+
+    this.pendingTwinMessages.clear();
   }
 
   private handleMavlinkStatus(message: IMessage): void {
     const destination = message.headers.destination;
     const systemId = destination ? parseMavlinkSystemId(destination) : undefined;
 
-    if (systemId === undefined || !hasExactlyOneDroneForSystemId(systemId)) {
+    if (systemId === undefined) {
       return;
     }
 
@@ -189,21 +209,6 @@ export class StompTransport implements MessageTransport {
       message,
       (payload) => dispatchMavlinkStreamStatus(systemId, payload),
     );
-  }
-
-  private shouldProcessTwin(destination: string): boolean {
-    const now = Date.now();
-    const previous = this.lastTwinProcessedAt.get(destination);
-
-    if (
-      previous !== undefined
-      && now - previous < TWIN_UPDATE_MINIMUM_INTERVAL_MILLIS
-    ) {
-      return false;
-    }
-
-    this.lastTwinProcessedAt.set(destination, now);
-    return true;
   }
 
   private parse(
@@ -274,12 +279,4 @@ function parseMavlinkSystemId(destination: string): number | undefined {
   return Number.isInteger(systemId) && systemId >= 1 && systemId <= 255
     ? systemId
     : undefined;
-}
-
-function hasExactlyOneDroneForSystemId(systemId: number): boolean {
-  const matches = Object.values(useAppStore.getState().drones).filter(
-    (drone) => drone.twin?.systemId === systemId,
-  );
-
-  return matches.length === 1;
 }
