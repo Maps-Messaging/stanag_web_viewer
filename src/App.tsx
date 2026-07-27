@@ -9,7 +9,14 @@ import { TaskPanel } from './components/TaskPanel';
 import { createTransport } from './messaging/transportFactory';
 import type { MessageTransport } from './messaging/transport';
 import type { BrokerConfiguration } from './models/types';
+import {
+  buildNamedValueFloatEvent,
+  namedValueFloatTopic,
+} from './services/mavlinkEvents';
 import { useAppStore } from './state/useAppStore';
+
+const DETECTION_NAME = 'DETECT';
+const DETECTION_DURATION_MILLIS = 5_000;
 
 const theme = createTheme({
   palette: {
@@ -54,10 +61,55 @@ export default function App() {
 
   async function detectDrone(droneId: string): Promise<void> {
     const drone = useAppStore.getState().drones[droneId];
+    const currentTransport = transportRef.current;
+
+    if (!drone) {
+      throw new Error(`Unknown drone ${droneId}`);
+    }
+
+    if (!currentTransport) {
+      throw new Error('Message transport is not connected');
+    }
+
+    const systemId = drone.twin?.systemId;
+    const componentId = drone.twin?.componentId ?? 1;
+
+    if (systemId === undefined) {
+      throw new Error(`MAVLink system ID is unavailable for ${drone.name}`);
+    }
+
+    const destination = namedValueFloatTopic(systemId);
+
+    await currentTransport.publishEvent(
+      destination,
+      buildNamedValueFloatEvent(
+        systemId,
+        componentId,
+        DETECTION_NAME,
+        1,
+      ),
+    );
 
     addEvent({
-      level: 'WARN',
-      message: `Detect requested for ${drone?.name ?? droneId}; MAVLink event is not configured`,
+      level: 'INFO',
+      message: `Detection asserted for ${drone.name}`,
+    });
+
+    await delay(DETECTION_DURATION_MILLIS);
+
+    await currentTransport.publishEvent(
+      destination,
+      buildNamedValueFloatEvent(
+        systemId,
+        componentId,
+        DETECTION_NAME,
+        0,
+      ),
+    );
+
+    addEvent({
+      level: 'INFO',
+      message: `Detection cleared for ${drone.name}`,
     });
   }
 
@@ -78,4 +130,10 @@ export default function App() {
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onApply={applySettings} />
     </ThemeProvider>
   );
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, milliseconds);
+  });
 }
