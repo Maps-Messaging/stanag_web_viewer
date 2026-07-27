@@ -9,6 +9,7 @@ import type {
   MavlinkStreamStatus,
   TaskType,
 } from '../models/types';
+import { defaultBrokerUrl } from '../services/brokerDefaults';
 import { createUuid } from '../services/uuid';
 
 interface AppState {
@@ -36,11 +37,16 @@ interface AppState {
 
 const env = import.meta.env;
 const storedSourceUuid = localStorage.getItem('stanag-demo-source-uuid') ?? createUuid();
+const configuredTransport = (env.VITE_TRANSPORT ?? 'stomp') as BrokerConfiguration['transport'];
+const transportBrokerUrl = configuredTransport === 'mqtt'
+  ? env.VITE_MQTT_BROKER_URL
+  : env.VITE_STOMP_BROKER_URL;
+
 localStorage.setItem('stanag-demo-source-uuid', storedSourceUuid);
 
 const initialConfiguration: BrokerConfiguration = {
-  transport: (env.VITE_TRANSPORT ?? 'stomp') as BrokerConfiguration['transport'],
-  brokerUrl: env.VITE_BROKER_URL ?? 'ws://localhost:8674/stomp',
+  transport: configuredTransport,
+  brokerUrl: transportBrokerUrl ?? env.VITE_BROKER_URL ?? defaultBrokerUrl(configuredTransport),
   username: env.VITE_USERNAME ?? '',
   password: env.VITE_PASSWORD ?? '',
   droneTopic: env.VITE_DRONE_TOPIC ?? '4817/catl/maps/json/+/+',
