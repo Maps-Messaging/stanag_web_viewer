@@ -1,6 +1,7 @@
 import { Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TextField } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { BrokerConfiguration } from '../models/types';
+import { defaultBrokerUrl, isDefaultBrokerUrl } from '../services/brokerDefaults';
 import { useAppStore } from '../state/useAppStore';
 
 interface Props {
@@ -22,6 +23,16 @@ export function SettingsDialog({ open, onClose, onApply }: Props) {
     setConfiguration((previous) => ({ ...previous, [field]: value }));
   }
 
+  function changeTransport(transport: BrokerConfiguration['transport']): void {
+    setConfiguration((previous) => ({
+      ...previous,
+      transport,
+      brokerUrl: isDefaultBrokerUrl(previous.brokerUrl, previous.transport)
+        ? defaultBrokerUrl(transport)
+        : previous.brokerUrl,
+    }));
+  }
+
   async function apply(): Promise<void> {
     setApplying(true);
     try {
@@ -37,7 +48,12 @@ export function SettingsDialog({ open, onClose, onApply }: Props) {
       <DialogTitle>Connection settings</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          <TextField select label="Transport" value={configuration.transport} onChange={(event) => change('transport', event.target.value as BrokerConfiguration['transport'])}>
+          <TextField
+            select
+            label="Transport"
+            value={configuration.transport}
+            onChange={(event) => changeTransport(event.target.value as BrokerConfiguration['transport'])}
+          >
             <MenuItem value="stomp">STOMP over WebSockets</MenuItem>
             <MenuItem value="mqtt">MQTT over WebSockets</MenuItem>
           </TextField>
