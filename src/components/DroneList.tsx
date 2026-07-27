@@ -2,6 +2,7 @@ import FlightIcon from '@mui/icons-material/Flight';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import {
   Box,
+  Button,
   Chip,
   IconButton,
   List,
@@ -17,7 +18,11 @@ import { useAppStore } from '../state/useAppStore';
 import { AttitudeIndicator } from './AttitudeIndicator';
 import { DroneDetailsDialog } from './DroneDetailsDialog';
 
-export function DroneList() {
+interface DroneListProps {
+  onDetect: (droneId: string) => Promise<void>;
+}
+
+export function DroneList({ onDetect }: DroneListProps) {
   const droneIds = useAppStore(
     useShallow((state) => Object.keys(state.drones)),
   );
@@ -50,6 +55,7 @@ export function DroneList() {
               key={droneId}
               droneId={droneId}
               onShowDetails={showDetails}
+              onDetect={onDetect}
             />
           ))}
         </List>
@@ -67,18 +73,46 @@ export function DroneList() {
 interface DroneListItemProps {
   droneId: string;
   onShowDetails: (droneId: string) => void;
+  onDetect: (droneId: string) => Promise<void>;
 }
 
 const DroneListItem = memo(function DroneListItem({
   droneId,
   onShowDetails,
+  onDetect,
 }: DroneListItemProps) {
   const drone = useAppStore((state) => state.drones[droneId]);
   const selected = useAppStore((state) => state.selectedDroneId === droneId);
+  const connected = useAppStore((state) => state.connected);
   const selectDrone = useAppStore((state) => state.selectDrone);
+  const addEvent = useAppStore((state) => state.addEvent);
+  const [detecting, setDetecting] = useState(false);
 
   if (!drone) {
     return null;
+  }
+
+  const systemId = drone.twin?.systemId;
+  const detectDisabled = detecting || !connected || systemId === undefined;
+  const detectTooltip = systemId === undefined
+    ? 'MAVLink system ID unavailable'
+    : !connected
+      ? 'Broker is disconnected'
+      : 'Publish the detect MAVLink event';
+
+  async function detect(): Promise<void> {
+    setDetecting(true);
+
+    try {
+      await onDetect(drone.id);
+    } catch (error) {
+      addEvent({
+        level: 'ERROR',
+        message: `Detect failed for ${drone.name}: ${String(error)}`,
+      });
+    } finally {
+      setDetecting(false);
+    }
   }
 
   return (
@@ -190,6 +224,23 @@ const DroneListItem = memo(function DroneListItem({
             }
           />
         </Stack>
+
+        <Tooltip title={detectTooltip}>
+          <span>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={detectDisabled}
+              onClick={(event) => {
+                event.stopPropagation();
+                void detect();
+              }}
+              sx={{ mt: 0.75 }}
+            >
+              {detecting ? 'Detecting…' : 'Detect'}
+            </Button>
+          </span>
+        </Tooltip>
       </Box>
     </ListItemButton>
   );
