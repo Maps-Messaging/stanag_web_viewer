@@ -24,6 +24,23 @@ Push and cancel use `MessageTypeEnum_TASK_ADMIN` and publish to the configured p
 
 The command source UUID is generated once and stored in browser local storage unless `VITE_SOURCE_UUID` is configured.
 
+## Browser broker defaults
+
+Unless a broker URL is supplied through the environment, the UI uses the hostname from the page that loaded it.
+
+| Transport | HTTP page | HTTPS page |
+| --- | --- | --- |
+| STOMP over WebSockets | `ws://<page-host>:8674/stomp` | `wss://<page-host>:8695/stomp` |
+| MQTT over WebSockets | `ws://<page-host>:1883/mqtt` | `wss://<page-host>:1892/mqtt` |
+
+Broker URL configuration is resolved in this order:
+
+1. `VITE_STOMP_BROKER_URL` or `VITE_MQTT_BROKER_URL` for the selected transport
+2. `VITE_BROKER_URL` as a transport-independent override
+3. The browser-derived default above
+
+Changing transport in the connection settings also changes the URL when the current URL is still the generated default. Manually entered or environment-supplied URLs are preserved.
+
 ## Run
 
 ```bash
