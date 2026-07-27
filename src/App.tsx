@@ -52,13 +52,24 @@ export default function App() {
     await connect(nextConfiguration);
   }
 
+  async function detectDrone(droneId: string): Promise<void> {
+    const drone = useAppStore.getState().drones[droneId];
+
+    addEvent({
+      level: 'WARN',
+      message: `Detect requested for ${drone?.name ?? droneId}; MAVLink event is not configured`,
+    });
+  }
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <div className="app-shell">
         <ConnectionBar onOpenSettings={() => setSettingsOpen(true)} />
         <main className="workspace">
-          <aside className="drone-list"><DroneList /></aside>
+          <aside className="drone-list">
+            <DroneList onDetect={detectDrone} />
+          </aside>
           <section className="map-panel"><MapView /></section>
           <aside className="task-panel"><TaskPanel transport={transport} /></aside>
           <section className="event-log"><EventLog /></section>
