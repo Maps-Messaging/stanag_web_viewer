@@ -1,5 +1,5 @@
-import type { DroneTelemetryUpdate, GeoPoint, MavlinkSequenceStatus, MavlinkStreamStatus, TwinState } from '../models/types';
-import { getStanagMessageType, parseNodeMessage, parseTaskStatus } from '../services/stanagAdapter';
+import type { DroneTask, DroneTelemetryUpdate, GeoPoint, MavlinkSequenceStatus, MavlinkStreamStatus, TwinState } from '../models/types';
+import { getStanagMessageType, parseNodeMessage, parseTaskAdmin, parseTaskStatus } from '../services/stanagAdapter';
 import { useAppStore } from '../state/useAppStore';
 
 export function dispatchStanagMessage(payload: unknown): void {
@@ -18,6 +18,42 @@ export function dispatchStanagMessage(payload: unknown): void {
       });
     }
 
+    return;
+  }
+
+  if (messageType === 'MessageTypeEnum_TASK_ADMIN') {
+    const admin = parseTaskAdmin(payload);
+
+    if (admin.action === 'PUSH' && admin.task) {
+      store.upsertTask(withDisplayFields(admin.task));
+      store.addEvent({
+        level: 'INFO',
+        message: `TASK_ADMIN PUSH: ${admin.task.type} ${admin.taskId}`,
+        payload,
+      });
+      return;
+    }
+
+    const existing = store.tasks[admin.taskId];
+    if (!existing) {
+      store.addEvent({
+        level: 'WARN',
+        message: `TASK_ADMIN CANCEL received for unknown task ${admin.taskId}`,
+        payload,
+      });
+      return;
+    }
+
+    store.upsertTask({
+      ...existing,
+      state: 'CANCEL_REQUESTED',
+      updatedAt: Date.now(),
+    });
+    store.addEvent({
+      level: 'INFO',
+      message: `TASK_ADMIN CANCEL: ${admin.taskId}`,
+      payload,
+    });
     return;
   }
 
@@ -46,7 +82,7 @@ export function dispatchStanagMessage(payload: unknown): void {
       level: status.state === 'FAILED' || status.state === 'REJECTED' ? 'ERROR' : 'INFO',
       message: `${status.messageType}: ${status.taskId} ${status.state}${
         status.percentComplete === undefined ? '' : ` ${status.percentComplete.toFixed(1)}%`
-      }`,
+      }${status.message ? `: ${status.message}` : ''}`,
       payload,
     });
     return;
@@ -59,27 +95,32 @@ export function dispatchStanagMessage(payload: unknown): void {
   });
 }
 
+function withDisplayFields(task: DroneTask): DroneTask {
+  switch (task.geometry.type) {
+    case 'POINT':
+      return { ...task, geometryType: 'POINT', point: task.geometry.point };
+    case 'CIRCLE':
+      return { ...task, geometryType: 'CIRCLE', point: task.geometry.centre, radiusMeters: task.geometry.radiusMeters };
+    case 'LINE':
+    case 'RECTANGLE':
+    case 'POLYGON':
+      return { ...task, geometryType: task.geometry.type, point: task.geometry.points[0] };
+    case 'CORRIDOR':
+      return { ...task, geometryType: 'CORRIDOR', point: task.geometry.centreLine[0] };
+  }
+}
+
 export function dispatchTwinMessage(payload: unknown): void {
-  if (!isRecord(payload)) {
-    return;
-  }
-
+  if (!isRecord(payload)) return;
   const uuid = stringValue(payload.uuid);
-
-  if (!uuid) {
-    return;
-  }
+  if (!uuid) return;
 
   const store = useAppStore.getState();
-
-  if (!store.drones[uuid]) {
-    return;
-  }
+  if (!store.drones[uuid]) return;
 
   const orientation = recordValue(payload.orientation);
   const geoPosition = recordValue(payload.geoPosition);
   const velocityVector = recordValue(payload.velocityVector);
-
   const heading = numberValue(payload.headingDegrees) ?? numberValue(orientation?.yawDegrees);
   const groundSpeed = numberValue(payload.groundSpeedMetersPerSecond);
   const climbRate = numberValue(payload.verticalSpeedMetersPerSecond);
@@ -103,40 +144,19 @@ export function dispatchTwinMessage(payload: unknown): void {
 }
 
 function buildPosition(geoPosition: Record<string, unknown> | undefined): GeoPoint | undefined {
-  if (!geoPosition) {
-    return undefined;
-  }
-
+  if (!geoPosition) return undefined;
   const latitude = numberValue(geoPosition.latitude);
   const longitude = numberValue(geoPosition.longitude);
-
-  if (latitude === undefined || longitude === undefined) {
-    return undefined;
-  }
-
-  return {
-    latitude,
-    longitude,
-    altitude: numberValue(geoPosition.altitudeMslMeters),
-  };
+  if (latitude === undefined || longitude === undefined) return undefined;
+  return { latitude, longitude, altitude: numberValue(geoPosition.altitudeMslMeters) };
 }
 
 function calculateCourseDegrees(velocityVector: Record<string, unknown> | undefined): number | undefined {
-  if (!velocityVector) {
-    return undefined;
-  }
-
+  if (!velocityVector) return undefined;
   const north = numberValue(velocityVector.northMetersPerSecond);
   const east = numberValue(velocityVector.eastMetersPerSecond);
-
-  if (north === undefined || east === undefined) {
-    return undefined;
-  }
-
-  if (Math.abs(north) < 0.0001 && Math.abs(east) < 0.0001) {
-    return undefined;
-  }
-
+  if (north === undefined || east === undefined) return undefined;
+  if (Math.abs(north) < 0.0001 && Math.abs(east) < 0.0001) return undefined;
   return normaliseDegrees(Math.atan2(east, north) * 180 / Math.PI);
 }
 
@@ -145,18 +165,13 @@ function normaliseDegrees(value: number): number {
 }
 
 function parseTimestamp(value: unknown): number | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
+  if (typeof value !== 'string') return undefined;
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? undefined : timestamp;
 }
 
 function removeUndefinedValues<T extends object>(value: T): T {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry !== undefined),
-  ) as T;
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
@@ -176,15 +191,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function dispatchMavlinkStreamStatus(systemId: number, payload: unknown): void {
-  if (!Number.isInteger(systemId) || systemId < 1 || systemId > 255 || !isRecord(payload)) {
-    return;
-  }
-
+  if (!Number.isInteger(systemId) || systemId < 1 || systemId > 255 || !isRecord(payload)) return;
   const status = stringValue(payload.status);
-
-  if (!isMavlinkSequenceStatus(status)) {
-    return;
-  }
+  if (!isMavlinkSequenceStatus(status)) return;
 
   const streamStatus: MavlinkStreamStatus = {
     previousSequenceNumber: integerValue(payload.previousSequenceNumber) ?? 0,
@@ -201,11 +210,7 @@ export function dispatchMavlinkStreamStatus(systemId: number, payload: unknown):
 }
 
 function isMavlinkSequenceStatus(value: string | undefined): value is MavlinkSequenceStatus {
-  return value === 'INITIAL'
-    || value === 'OK'
-    || value === 'LOSS'
-    || value === 'RESET'
-    || value === 'OUT_OF_ORDER';
+  return value === 'INITIAL' || value === 'OK' || value === 'LOSS' || value === 'RESET' || value === 'OUT_OF_ORDER';
 }
 
 function integerValue(value: unknown): number | undefined {
