@@ -3,17 +3,15 @@ import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import SendIcon from '@mui/icons-material/Send';
 import { Alert, Box, Button, ButtonGroup, Divider, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useMemo, useState } from 'react';
-import type { DroneTask, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
+import type { DroneTask, GeoPoint, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
 import type { MessageTransport } from '../messaging/transport';
 import { createUuid } from '../services/uuid';
 import { useAppStore } from '../state/useAppStore';
 
-interface Props {
-  transport?: MessageTransport;
-}
+interface Props { transport?: MessageTransport; }
 
 const TASK_TYPES: TaskType[] = ['REPOSITION', 'LOITER', 'NAVIGATE'];
-const AREA_GEOMETRIES: TaskGeometryType[] = ['POINT', 'CIRCLE', 'LINE', 'RECTANGLE', 'POLYGON', 'CORRIDOR'];
+const GEOMETRIES: TaskGeometryType[] = ['POINT', 'CIRCLE', 'LINE', 'RECTANGLE', 'POLYGON', 'CORRIDOR'];
 
 export function TaskPanel({ transport }: Props) {
   const selectedDroneId = useAppStore((state) => state.selectedDroneId);
@@ -31,7 +29,7 @@ export function TaskPanel({ transport }: Props) {
 
   const latestTask = useMemo(() => Object.values(tasks)
     .filter((task) => task.droneId === selectedDroneId)
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0], [tasks, selectedDroneId]);
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0], [tasks, selectedDroneId]);
 
   const supportedTaskTypes = selectedDrone?.capabilities.map((capability) => normaliseTaskType(capability.taskType)) ?? [];
   const capability = selectedDrone?.capabilities.find((candidate) => normaliseTaskType(candidate.taskType) === taskType);
@@ -48,12 +46,17 @@ export function TaskPanel({ transport }: Props) {
   async function submit(): Promise<void> {
     if (!selectedDrone || !taskType || !authorityGuid || !transport || geometryError) return;
 
+    const geometry = buildGeometry(effectiveGeometryType, draftPoints, altitude, radius, corridorWidth);
+    const summary = geometrySummary(geometry);
     const task: DroneTask = {
       id: createUuid(),
       droneId: selectedDrone.id,
       authorityGuid,
       type: taskType,
-      geometry: buildGeometry(effectiveGeometryType, draftPoints, altitude, radius, corridorWidth),
+      geometry,
+      geometryType: geometry.type,
+      point: summary.point,
+      radiusMeters: summary.radiusMeters,
       state: 'SUBMITTED',
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -62,11 +65,7 @@ export function TaskPanel({ transport }: Props) {
     try {
       await transport.publishTask(task);
       clearDraftPoints();
-      addEvent({
-        level: 'INFO',
-        message: `Published ${task.type} task ${task.id}; awaiting TASK_ADMIN`,
-        payload: task,
-      });
+      addEvent({ level: 'INFO', message: `Published ${task.type} task ${task.id}; awaiting TASK_ADMIN`, payload: task });
     } catch (error) {
       addEvent({ level: 'ERROR', message: `Task submission failed: ${String(error)}`, payload: task });
     }
@@ -74,7 +73,6 @@ export function TaskPanel({ transport }: Props) {
 
   async function cancel(): Promise<void> {
     if (!latestTask || !transport) return;
-
     try {
       await transport.cancelTask(latestTask);
       addEvent({ level: 'INFO', message: `Published cancellation for task ${latestTask.id}; awaiting TASK_ADMIN` });
@@ -93,12 +91,7 @@ export function TaskPanel({ transport }: Props) {
       <Typography variant="overline">Task</Typography>
       <ButtonGroup fullWidth sx={{ mb: 2 }}>
         {TASK_TYPES.map((type) => (
-          <Button
-            key={type}
-            variant={taskType === type ? 'contained' : 'outlined'}
-            disabled={Boolean(selectedDrone) && !supportedTaskTypes.includes(type)}
-            onClick={() => chooseTask(type)}
-          >
+          <Button key={type} variant={taskType === type ? 'contained' : 'outlined'} disabled={Boolean(selectedDrone) && !supportedTaskTypes.includes(type)} onClick={() => chooseTask(type)}>
             {type}
           </Button>
         ))}
@@ -110,28 +103,14 @@ export function TaskPanel({ transport }: Props) {
 
       <Stack spacing={2}>
         {taskType && taskType !== 'REPOSITION' && (
-          <TextField
-            select
-            label="Geometry"
-            value={geometryType}
-            onChange={(event) => {
-              setGeometryType(event.target.value as TaskGeometryType);
-              clearDraftPoints();
-            }}
-          >
-            {AREA_GEOMETRIES.map((type) => <MenuItem key={type} value={type}>{geometryLabel(type)}</MenuItem>)}
+          <TextField select label="Geometry" value={geometryType} onChange={(event) => { setGeometryType(event.target.value as TaskGeometryType); clearDraftPoints(); }}>
+            {GEOMETRIES.map((type) => <MenuItem key={type} value={type}>{geometryLabel(type)}</MenuItem>)}
           </TextField>
         )}
 
         <TextField label="Altitude (m)" type="number" value={altitude} onChange={(event) => setAltitude(Number(event.target.value))} />
-
-        {effectiveGeometryType === 'CIRCLE' && (
-          <TextField label="Radius (m)" type="number" value={radius} onChange={(event) => setRadius(Number(event.target.value))} inputProps={{ min: 1 }} />
-        )}
-
-        {effectiveGeometryType === 'CORRIDOR' && (
-          <TextField label="Corridor width (m)" type="number" value={corridorWidth} onChange={(event) => setCorridorWidth(Number(event.target.value))} inputProps={{ min: 1 }} />
-        )}
+        {effectiveGeometryType === 'CIRCLE' && <TextField label="Radius (m)" type="number" value={radius} onChange={(event) => setRadius(Number(event.target.value))} inputProps={{ min: 1 }} />}
+        {effectiveGeometryType === 'CORRIDOR' && <TextField label="Corridor width (m)" type="number" value={corridorWidth} onChange={(event) => setCorridorWidth(Number(event.target.value))} inputProps={{ min: 1 }} />}
 
         <Typography variant="body2">Selected map points: {draftPoints.length}</Typography>
         {draftPoints.map((point, index) => (
@@ -140,9 +119,7 @@ export function TaskPanel({ transport }: Props) {
           </Typography>
         ))}
 
-        {taskType && !authorityGuid && selectedDrone && (
-          <Alert severity="warning">The node description does not advertise an authority GUID for {taskType}.</Alert>
-        )}
+        {taskType && !authorityGuid && selectedDrone && <Alert severity="warning">The node description does not advertise an authority GUID for {taskType}.</Alert>}
         {taskType && geometryError && draftPoints.length > 0 && <Alert severity="info">{geometryError}</Alert>}
 
         <Box sx={{ display: 'flex', gap: 1 }}>
@@ -166,18 +143,14 @@ export function TaskPanel({ transport }: Props) {
           )}
           <Button color="error" variant="outlined" startIcon={<CancelIcon />} disabled={!['SUBMITTED', 'ACCEPTED', 'EXECUTING'].includes(latestTask.state)} onClick={cancel}>Cancel task</Button>
         </Stack>
-      ) : (
-        <Typography variant="body2" color="text.secondary">No task for this drone.</Typography>
-      )}
+      ) : <Typography variant="body2" color="text.secondary">No task for this drone.</Typography>}
     </Paper>
   );
 }
 
-function normaliseTaskType(value: string): string {
-  return value.replace('TaskTypeEnum_', '');
-}
+function normaliseTaskType(value: string): string { return value.replace('TaskTypeEnum_', ''); }
 
-function buildGeometry(type: TaskGeometryType, points: DroneTask['geometry'] extends never ? never : Array<{ latitude: number; longitude: number; altitude?: number }>, altitude: number, radius: number, corridorWidth: number): TaskGeometry {
+function buildGeometry(type: TaskGeometryType, points: GeoPoint[], altitude: number, radius: number, corridorWidth: number): TaskGeometry {
   const elevated = points.map((point) => ({ ...point, altitude }));
   switch (type) {
     case 'POINT': return { type, point: elevated[0] };
@@ -186,6 +159,17 @@ function buildGeometry(type: TaskGeometryType, points: DroneTask['geometry'] ext
     case 'RECTANGLE': return { type, points: elevated };
     case 'POLYGON': return { type, points: elevated };
     case 'CORRIDOR': return { type, centreLine: elevated, widthMeters: corridorWidth };
+  }
+}
+
+function geometrySummary(geometry: TaskGeometry): { point: GeoPoint; radiusMeters?: number } {
+  switch (geometry.type) {
+    case 'POINT': return { point: geometry.point };
+    case 'CIRCLE': return { point: geometry.centre, radiusMeters: geometry.radiusMeters };
+    case 'LINE':
+    case 'RECTANGLE':
+    case 'POLYGON': return { point: geometry.points[0] };
+    case 'CORRIDOR': return { point: geometry.centreLine[0] };
   }
 }
 
@@ -210,10 +194,7 @@ function geometryInstruction(type: TaskGeometryType): string {
   }
 }
 
-function geometryLabel(type: TaskGeometryType): string {
-  if (type === 'CIRCLE') return 'Circle / orbit';
-  return type.charAt(0) + type.slice(1).toLowerCase();
-}
+function geometryLabel(type: TaskGeometryType): string { return type === 'CIRCLE' ? 'Circle / orbit' : type.charAt(0) + type.slice(1).toLowerCase(); }
 
 function taskSeverity(state: DroneTask['state']): 'success' | 'info' | 'warning' | 'error' {
   if (state === 'COMPLETED') return 'success';
