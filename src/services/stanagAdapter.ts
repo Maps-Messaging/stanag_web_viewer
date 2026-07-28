@@ -1,4 +1,13 @@
-import type { BrokerConfiguration, Drone, DroneCapability, DroneTask, GeoPoint, TaskState } from '../models/types';
+import type {
+  BrokerConfiguration,
+  Drone,
+  DroneCapability,
+  DroneTask,
+  GeoPoint,
+  TaskGeometry,
+  TaskState,
+  TaskType,
+} from '../models/types';
 import { createUuid } from './uuid';
 
 export interface ParsedTaskStatus {
@@ -8,6 +17,15 @@ export interface ParsedTaskStatus {
   state: TaskState;
   percentComplete?: number;
   message?: string;
+}
+
+export interface ParsedTaskAdmin {
+  action: 'PUSH' | 'CANCEL';
+  taskId: string;
+  droneId: string;
+  sourceNode: string;
+  authorityGuid?: string;
+  task?: DroneTask;
 }
 
 export interface ParsedNodeMessage {
@@ -36,7 +54,7 @@ function asNumber(value: unknown, field: string): number {
 }
 
 function optionalNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && !Number.isNaN(value) ? value : undefined;
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function asString(value: unknown, field: string): string {
@@ -109,18 +127,23 @@ export function parseNodeMessage(payload: unknown): ParsedNodeMessage {
 function parsePosition(pose: Record<string, unknown> | undefined): GeoPoint | undefined {
   const position = optionalObject(pose?.position);
   if (!position || position.$discriminator !== 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE') return undefined;
+  return parseLatitudeLongitudeAltitude(optionalObject(position.latitude_longitude_altitude));
+}
 
-  const lla = optionalObject(position.latitude_longitude_altitude);
-  if (!lla) return undefined;
+function parseLatitudeLongitudeAltitude(value: Record<string, unknown> | undefined): GeoPoint | undefined {
+  if (!value) return undefined;
+  const latitude = optionalNumber(value.latitude) ?? optionalNumber(value.y);
+  const longitude = optionalNumber(value.longitude) ?? optionalNumber(value.x);
+  if (latitude === undefined || longitude === undefined) return undefined;
 
-  const altitudes = Array.isArray(lla.altitude) ? lla.altitude : [];
+  const altitudes = Array.isArray(value.altitude) ? value.altitude : [];
   const altitudeEntries = altitudes.map(optionalObject).filter((entry): entry is Record<string, unknown> => Boolean(entry));
   const preferredAltitude = altitudeEntries.find((entry) => entry.type === 'AltitudeTypeEnum_WGS') ?? altitudeEntries[0];
 
   return {
-    latitude: asNumber(lla.latitude, 'body.pose.position.latitude_longitude_altitude.latitude'),
-    longitude: asNumber(lla.longitude, 'body.pose.position.latitude_longitude_altitude.longitude'),
-    altitude: optionalNumber(preferredAltitude?.value),
+    latitude,
+    longitude,
+    altitude: optionalNumber(preferredAltitude?.value) ?? optionalNumber(value.altitude) ?? optionalNumber(value.z),
     altitudeType: optionalString(preferredAltitude?.type),
   };
 }
@@ -233,35 +256,46 @@ function buildAuthority(authorityGuid: string): unknown {
 }
 
 function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
+  const discriminator = `TaskTypeEnum_${task.type}`;
+  const taskKey = task.type.toLowerCase();
+
   if (task.type === 'REPOSITION') {
     return {
-      $discriminator: 'TaskTypeEnum_REPOSITION',
-      reposition: {
-        location: {
+      $discriminator: discriminator,
+      [taskKey]: {
+        location: buildTimestampedLocation(task.geometry, timestamp),
+      },
+    };
+  }
+
+  if (task.type === 'LOITER' && task.geometry.type === 'POINT') {
+    return {
+      $discriminator: discriminator,
+      loiter: {
+        pose: {
           identifier: createUuid(),
           timestamp,
-          location: {
-            $discriminator: 'GeometryTypeEnum_POINT',
-            point: buildPosition(task.point),
+          pose: {
+            position: buildPositionUnion(task.geometry.point),
           },
         },
       },
     };
   }
 
-  if (task.geometryType === 'POINT') {
+  if (task.type === 'LOITER' && task.geometry.type === 'CIRCLE') {
     return {
-      $discriminator: 'TaskTypeEnum_LOITER',
+      $discriminator: discriminator,
       loiter: {
-        pose: {
+        volume: {
           identifier: createUuid(),
           timestamp,
-          pose: {
-            position: {
-              $discriminator: 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE',
-              latitude_longitude_altitude: {
-                latitude: task.point.latitude,
-                longitude: task.point.longitude,
+          volume: {
+            region: {
+              $discriminator: 'RegionTypeEnum_CIRCLE',
+              circle: {
+                centre: buildPosition(task.geometry.centre),
+                radius: task.geometry.radiusMeters,
               },
             },
           },
@@ -271,22 +305,51 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
   }
 
   return {
-    $discriminator: 'TaskTypeEnum_LOITER',
-    loiter: {
-      volume: {
-        identifier: createUuid(),
-        timestamp,
-        volume: {
-          region: {
-            $discriminator: 'RegionTypeEnum_CIRCLE',
-            circle: {
-              centre: buildPosition(task.point),
-              radius: task.radiusMeters,
-            },
-          },
-        },
-      },
+    $discriminator: discriminator,
+    [taskKey]: {
+      location: buildTimestampedLocation(task.geometry, timestamp),
     },
+  };
+}
+
+function buildTimestampedLocation(geometry: TaskGeometry, timestamp: string): unknown {
+  return {
+    identifier: createUuid(),
+    timestamp,
+    location: buildGeometry(geometry),
+  };
+}
+
+function buildGeometry(geometry: TaskGeometry): unknown {
+  switch (geometry.type) {
+    case 'POINT':
+      return { $discriminator: 'GeometryTypeEnum_POINT', point: buildPosition(geometry.point) };
+    case 'CIRCLE':
+      return {
+        $discriminator: 'GeometryTypeEnum_CIRCLE',
+        circle: { centre: buildPosition(geometry.centre), radius: geometry.radiusMeters },
+      };
+    case 'LINE':
+      return { $discriminator: 'GeometryTypeEnum_LINE', line: { points: geometry.points.map(buildPosition) } };
+    case 'RECTANGLE':
+      return { $discriminator: 'GeometryTypeEnum_RECTANGLE', rectangle: { points: closeRing(geometry.points).map(buildPosition) } };
+    case 'POLYGON':
+      return { $discriminator: 'GeometryTypeEnum_POLYGON', polygon: { points: closeRing(geometry.points).map(buildPosition) } };
+    case 'CORRIDOR':
+      return {
+        $discriminator: 'GeometryTypeEnum_CORRIDOR',
+        corridor_area: {
+          center_line: geometry.centreLine.map(buildPosition),
+          width: geometry.widthMeters,
+        },
+      };
+  }
+}
+
+function buildPositionUnion(point: GeoPoint): unknown {
+  return {
+    $discriminator: 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE',
+    latitude_longitude_altitude: buildPosition(point),
   };
 }
 
@@ -298,6 +361,13 @@ function buildPosition(point: GeoPoint): unknown {
   };
 }
 
+function closeRing(points: GeoPoint[]): GeoPoint[] {
+  if (points.length === 0) return [];
+  const first = points[0];
+  const last = points[points.length - 1];
+  return first.latitude === last.latitude && first.longitude === last.longitude ? points : [...points, first];
+}
+
 function stanagTimestamp(): string {
   return new Date().toISOString();
 }
@@ -306,6 +376,160 @@ export function getStanagMessageType(payload: unknown): string {
   const envelope = asObject(payload, 'message');
   const header = asObject(envelope.header, 'header');
   return asString(header.message_type, 'header.message_type');
+}
+
+export function parseTaskAdmin(payload: unknown): ParsedTaskAdmin {
+  const envelope = asObject(payload, 'message');
+  const header = asObject(envelope.header, 'header');
+  const body = asObject(envelope.body, 'body');
+  const messageType = asString(header.message_type, 'header.message_type');
+  if (messageType !== 'MessageTypeEnum_TASK_ADMIN') throw new Error(`Unsupported task message type: ${messageType}`);
+
+  const actionValue = asString(body.action, 'body.action');
+  const action = actionValue === 'TaskAdminActionEnum_PUSH'
+    ? 'PUSH'
+    : actionValue === 'TaskAdminActionEnum_CANCEL'
+      ? 'CANCEL'
+      : undefined;
+  if (!action) throw new Error(`Unsupported task admin action: ${actionValue}`);
+
+  const taskId = asString(body.identifier, 'body.identifier');
+  const droneId = asString(body.node, 'body.node');
+  const sourceNode = asString(header.source, 'header.source');
+  const authorityGuid = optionalString(optionalObject(body.authority)?.guid);
+
+  if (action === 'CANCEL') return { action, taskId, droneId, sourceNode, authorityGuid };
+
+  const description = asObject(body.description, 'body.description');
+  const type = parseTaskType(asString(description.$discriminator, 'body.description.$discriminator'));
+  const geometry = parseTaskGeometry(description);
+  const createdAt = parseTimestamp(header.time_sent) ?? Date.now();
+
+  return {
+    action,
+    taskId,
+    droneId,
+    sourceNode,
+    authorityGuid,
+    task: {
+      id: taskId,
+      droneId,
+      authorityGuid: authorityGuid ?? '',
+      type,
+      geometry,
+      state: 'SUBMITTED',
+      createdAt,
+      updatedAt: Date.now(),
+      sourceNode,
+    },
+  };
+}
+
+function parseTaskType(discriminator: string): TaskType {
+  const value = discriminator.replace('TaskTypeEnum_', '');
+  if (value === 'REPOSITION' || value === 'LOITER' || value === 'NAVIGATE') return value;
+  throw new Error(`Unsupported task type: ${discriminator}`);
+}
+
+function parseTaskGeometry(description: Record<string, unknown>): TaskGeometry {
+  const geometry = findDiscriminatedObject(description, (value) => value.startsWith('GeometryTypeEnum_'));
+  if (geometry) return parseGeometryObject(geometry);
+
+  const region = findDiscriminatedObject(description, (value) => value === 'RegionTypeEnum_CIRCLE');
+  if (region) {
+    const circle = asObject(region.circle, 'circle');
+    const centre = parsePoint(circle.centre);
+    const radiusMeters = parseDistance(circle.radius, 'circle.radius');
+    return { type: 'CIRCLE', centre, radiusMeters };
+  }
+
+  const position = findDiscriminatedObject(description, (value) => value === 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE');
+  if (position) {
+    const point = parseLatitudeLongitudeAltitude(optionalObject(position.latitude_longitude_altitude));
+    if (point) return { type: 'POINT', point };
+  }
+
+  throw new Error('Task description does not contain a supported geometry');
+}
+
+function parseGeometryObject(value: Record<string, unknown>): TaskGeometry {
+  switch (value.$discriminator) {
+    case 'GeometryTypeEnum_POINT':
+      return { type: 'POINT', point: parsePoint(value.point) };
+    case 'GeometryTypeEnum_CIRCLE': {
+      const circle = asObject(value.circle, 'circle');
+      return { type: 'CIRCLE', centre: parsePoint(circle.centre), radiusMeters: parseDistance(circle.radius, 'circle.radius') };
+    }
+    case 'GeometryTypeEnum_LINE':
+      return { type: 'LINE', points: parsePointList(asObject(value.line, 'line').points, 2, 'line.points') };
+    case 'GeometryTypeEnum_RECTANGLE':
+      return { type: 'RECTANGLE', points: removeClosingPoint(parsePointList(asObject(value.rectangle, 'rectangle').points, 4, 'rectangle.points')) };
+    case 'GeometryTypeEnum_POLYGON':
+      return { type: 'POLYGON', points: removeClosingPoint(parsePointList(asObject(value.polygon, 'polygon').points, 3, 'polygon.points')) };
+    case 'GeometryTypeEnum_CORRIDOR': {
+      const corridor = asObject(value.corridor_area, 'corridor_area');
+      const centreLineValue = optionalObject(corridor.center_line)?.points ?? corridor.center_line;
+      return {
+        type: 'CORRIDOR',
+        centreLine: parsePointList(centreLineValue, 2, 'corridor_area.center_line'),
+        widthMeters: parseDistance(corridor.width, 'corridor_area.width'),
+      };
+    }
+    default:
+      throw new Error(`Unsupported geometry discriminator: ${String(value.$discriminator)}`);
+  }
+}
+
+function parsePoint(value: unknown): GeoPoint {
+  const object = asObject(value, 'point');
+  const point = parseLatitudeLongitudeAltitude(object)
+    ?? parseLatitudeLongitudeAltitude(optionalObject(object.latitude_longitude_altitude));
+  if (!point) throw new Error('Point does not contain latitude and longitude');
+  return point;
+}
+
+function parsePointList(value: unknown, minimum: number, field: string): GeoPoint[] {
+  if (!Array.isArray(value)) throw new Error(`Expected point array: ${field}`);
+  const points = value.map(parsePoint);
+  if (points.length < minimum) throw new Error(`${field} requires at least ${minimum} points`);
+  return points;
+}
+
+function parseDistance(value: unknown, field: string): number {
+  const direct = optionalNumber(value);
+  const wrapped = optionalNumber(optionalObject(value)?.value);
+  const result = direct ?? wrapped;
+  if (result === undefined || result <= 0) throw new Error(`${field} must be a positive distance`);
+  return result;
+}
+
+function removeClosingPoint(points: GeoPoint[]): GeoPoint[] {
+  if (points.length < 2) return points;
+  const first = points[0];
+  const last = points[points.length - 1];
+  return first.latitude === last.latitude && first.longitude === last.longitude ? points.slice(0, -1) : points;
+}
+
+function findDiscriminatedObject(
+  value: unknown,
+  predicate: (discriminator: string) => boolean,
+): Record<string, unknown> | undefined {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const match = findDiscriminatedObject(entry, predicate);
+      if (match) return match;
+    }
+    return undefined;
+  }
+  const object = optionalObject(value);
+  if (!object) return undefined;
+  const discriminator = optionalString(object.$discriminator);
+  if (discriminator && predicate(discriminator)) return object;
+  for (const entry of Object.values(object)) {
+    const match = findDiscriminatedObject(entry, predicate);
+    if (match) return match;
+  }
+  return undefined;
 }
 
 export function parseTaskStatus(payload: unknown): ParsedTaskStatus {
@@ -319,7 +543,6 @@ export function parseTaskStatus(payload: unknown): ParsedTaskStatus {
   }
 
   const stanagState = asString(body.state, 'body.state');
-
   const resultReason = optionalObject(body.result_reason);
 
   return {
@@ -328,10 +551,7 @@ export function parseTaskStatus(payload: unknown): ParsedTaskStatus {
     droneId: asString(body.node ?? header.source, 'body.node'),
     state: mapTaskState(stanagState),
     percentComplete: optionalNumber(body.percent_complete),
-
-    message:
-        optionalString(resultReason?.name)
-        ?? optionalString(body.message),
+    message: optionalString(resultReason?.name) ?? optionalString(body.message),
   };
 }
 
