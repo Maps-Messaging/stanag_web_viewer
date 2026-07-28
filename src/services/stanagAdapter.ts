@@ -278,7 +278,16 @@ function buildGeometry(geometry: TaskGeometry): unknown {
 }
 
 function buildPoint(point: GeoPoint): unknown {
-  return { latitude: point.latitude, longitude: point.longitude, altitude: point.altitude ?? 0 };
+  return {
+    latitude: point.latitude,
+    longitude: point.longitude,
+    altitude: [
+      {
+        type: point.altitudeType ?? 'AltitudeTypeEnum_WGS',
+        value: point.altitude ?? 0,
+      },
+    ],
+  };
 }
 
 function closeRing(points: GeoPoint[]): GeoPoint[] {
