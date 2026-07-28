@@ -7,7 +7,6 @@ export interface GeoPoint {
   altitudeType?: string;
 }
 
-
 export type MavlinkSequenceStatus =
   | 'INITIAL'
   | 'OK'
@@ -188,8 +187,16 @@ export interface DroneTelemetryUpdate {
   mavlinkStreamStatus?: MavlinkStreamStatus;
 }
 
-export type TaskType = 'REPOSITION' | 'LOITER';
-export type TaskGeometryType = 'POINT' | 'CIRCLE';
+export type TaskType = 'REPOSITION' | 'LOITER' | 'NAVIGATE';
+export type TaskGeometryType = 'POINT' | 'CIRCLE' | 'LINE' | 'RECTANGLE' | 'POLYGON' | 'CORRIDOR';
+
+export type TaskGeometry =
+  | { type: 'POINT'; point: GeoPoint }
+  | { type: 'CIRCLE'; centre: GeoPoint; radiusMeters: number }
+  | { type: 'LINE'; points: GeoPoint[] }
+  | { type: 'RECTANGLE'; points: GeoPoint[] }
+  | { type: 'POLYGON'; points: GeoPoint[] }
+  | { type: 'CORRIDOR'; centreLine: GeoPoint[]; widthMeters: number };
 
 export type TaskState =
   | 'DRAFT'
@@ -207,12 +214,11 @@ export interface DroneTask {
   droneId: string;
   authorityGuid: string;
   type: TaskType;
-  geometryType: TaskGeometryType;
-  point: GeoPoint;
-  radiusMeters?: number;
+  geometry: TaskGeometry;
   state: TaskState;
   createdAt: number;
   updatedAt: number;
+  sourceNode?: string;
   message?: string;
   percentComplete?: number;
 }
