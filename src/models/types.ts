@@ -81,16 +81,15 @@ export interface DroneTask {
   authorityGuid: string;
   type: TaskType;
   geometry: TaskGeometry;
+  geometryType: TaskGeometryType;
+  point: GeoPoint;
+  radiusMeters?: number;
   state: TaskState;
   createdAt: number;
   updatedAt: number;
   sourceNode?: string;
   message?: string;
   percentComplete?: number;
-  /** Transitional display fields retained while map rendering is migrated to TaskGeometry. */
-  geometryType?: TaskGeometryType;
-  point?: GeoPoint;
-  radiusMeters?: number;
 }
 
 export interface EventLogEntry { id: string; timestamp: number; level: 'INFO' | 'WARN' | 'ERROR'; message: string; payload?: unknown; }
