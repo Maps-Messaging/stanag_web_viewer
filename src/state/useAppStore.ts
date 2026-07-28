@@ -51,7 +51,7 @@ const initialConfiguration: BrokerConfiguration = {
   password: env.VITE_PASSWORD ?? '',
   droneTopic: env.VITE_DRONE_TOPIC ?? '4817/catl/maps/json/+/+',
   taskStatusTopic: env.VITE_TASK_STATUS_TOPIC ?? '',
-  taskAdminTopic: env.VITE_TASK_ADMIN_TOPIC ?? '/task/4817/catl/maps/json/{droneId}/MessageTypeEnum_TASK_ADMIN',
+  taskAdminTopic: env.VITE_TASK_ADMIN_TOPIC ?? '4817/catl/maps/json/{droneId}/MessageTypeEnum_TASK_ADMIN',
   sourceUuid: env.VITE_SOURCE_UUID ?? storedSourceUuid,
   stanagVersion: env.VITE_STANAG_VERSION ?? '0.3.0',
 };
