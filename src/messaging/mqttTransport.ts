@@ -79,17 +79,18 @@ export class MqttTransport implements MessageTransport {
   }
 
   async publishTask(task: DroneTask): Promise<void> {
-    await this.publish(task, buildTaskAdminPush(this.configuration, task));
+    await this.publishTaskPayload(task, buildTaskAdminPush(this.configuration, task));
   }
 
   async cancelTask(task: DroneTask): Promise<void> {
-    await this.publish(task, buildTaskAdminCancel(this.configuration, task));
+    await this.publishTaskPayload(task, buildTaskAdminCancel(this.configuration, task));
   }
-  private async publish(task: DroneTask, payload: unknown): Promise<void> {
-    if (!this.client?.connected) {
-      throw new Error('MQTT client is not connected');
-    }
 
+  async publishEvent(destination: string, payload: unknown): Promise<void> {
+    await this.publishJson(destination, payload);
+  }
+
+  private async publishTaskPayload(task: DroneTask, payload: unknown): Promise<void> {
     const drone = useAppStore.getState().drones[task.droneId];
 
     if (!drone) {
@@ -97,17 +98,25 @@ export class MqttTransport implements MessageTransport {
     }
 
     const topic = resolveTaskAdminDestination(
-        this.configuration.taskAdminTopic,
-        drone.name,
+      this.configuration.taskAdminTopic,
+      drone.name,
     );
 
+    await this.publishJson(topic, payload);
+  }
+
+  private async publishJson(topic: string, payload: unknown): Promise<void> {
+    if (!this.client?.connected) {
+      throw new Error('MQTT client is not connected');
+    }
+
     await this.client.publishAsync(
-        topic,
-        JSON.stringify(payload),
-        {
-          qos: 1,
-          retain: false,
-        },
+      topic,
+      JSON.stringify(payload),
+      {
+        qos: 1,
+        retain: false,
+      },
     );
   }
 

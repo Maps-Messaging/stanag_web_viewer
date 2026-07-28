@@ -86,11 +86,15 @@ export class StompTransport implements MessageTransport {
   }
 
   async publishTask(task: DroneTask): Promise<void> {
-    this.publish(task, buildTaskAdminPush(this.configuration, task));
+    this.publishTaskPayload(task, buildTaskAdminPush(this.configuration, task));
   }
 
   async cancelTask(task: DroneTask): Promise<void> {
-    this.publish(task, buildTaskAdminCancel(this.configuration, task));
+    this.publishTaskPayload(task, buildTaskAdminCancel(this.configuration, task));
+  }
+
+  async publishEvent(destination: string, payload: unknown): Promise<void> {
+    this.publishJson(destination, payload);
   }
 
   private subscribeToStanag(): void {
@@ -137,11 +141,7 @@ export class StompTransport implements MessageTransport {
     this.subscriptions = [];
   }
 
-  private publish(task: DroneTask, payload: unknown): void {
-    if (!this.client?.connected) {
-      throw new Error('STOMP client is not connected');
-    }
-
+  private publishTaskPayload(task: DroneTask, payload: unknown): void {
     const drone = useAppStore.getState().drones[task.droneId];
 
     if (!drone) {
@@ -152,6 +152,14 @@ export class StompTransport implements MessageTransport {
       this.configuration.taskAdminTopic,
       drone.name,
     );
+
+    this.publishJson(destination, payload);
+  }
+
+  private publishJson(destination: string, payload: unknown): void {
+    if (!this.client?.connected) {
+      throw new Error('STOMP client is not connected');
+    }
 
     this.client.publish({
       destination,
