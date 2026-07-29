@@ -15,10 +15,10 @@ const TASK_LAYERS = ['task-points', 'task-lines', 'task-volume-fill'];
 
 export function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<MapLibreMap>();
+  const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef<globalThis.Map<string, maplibregl.Marker>>(new globalThis.Map());
   const tracksRef = useRef<globalThis.Map<string, GeoPoint[]>>(new globalThis.Map());
-  const taskPopupRef = useRef<maplibregl.Popup>();
+  const taskPopupRef = useRef<maplibregl.Popup | null>(null);
   const tasks = useAppStore((state) => state.tasks);
   const taskType = useAppStore((state) => state.taskType);
   const draftPoints = useAppStore((state) => state.draftPoints);
@@ -90,8 +90,9 @@ export function MapView() {
       markersRef.current.clear();
       tracksRef.current.clear();
       taskPopupRef.current?.remove();
+      taskPopupRef.current = null;
       map.remove();
-      mapRef.current = undefined;
+      mapRef.current = null;
     };
   }, []);
 
@@ -333,7 +334,7 @@ function showTaskPopup(
   map: MapLibreMap,
   lngLat: maplibregl.LngLat,
   properties: Record<string, unknown>,
-  popupRef: MutableRefObject<maplibregl.Popup | undefined>,
+  popupRef: MutableRefObject<maplibregl.Popup | null>,
 ): void {
   popupRef.current?.remove();
   const root = document.createElement('div');
