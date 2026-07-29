@@ -235,7 +235,7 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
           volume: {
             region: {
               $discriminator: 'RegionTypeEnum_CIRCLE',
-              circle: { centre: buildPoint(task.geometry.centre), radius: task.geometry.radiusMeters },
+              circle: { centre: buildGeometryPoint(task.geometry.centre), radius: task.geometry.radiusMeters },
             },
           },
         },
@@ -258,26 +258,34 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
 function buildPositionUnion(point: GeoPoint): unknown {
   return {
     $discriminator: 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE',
-    latitude_longitude_altitude: buildPoint(point),
+    latitude_longitude_altitude: buildPositionValue(point),
   };
 }
 
 function buildGeometry(geometry: TaskGeometry): unknown {
   switch (geometry.type) {
-    case 'POINT': return { $discriminator: 'GeometryTypeEnum_POINT', point: buildPoint(geometry.point) };
-    case 'CIRCLE': return { $discriminator: 'GeometryTypeEnum_CIRCLE', circle: { centre: buildPoint(geometry.centre), radius: geometry.radiusMeters } };
-    case 'LINE': return { $discriminator: 'GeometryTypeEnum_LINE', line: { points: geometry.points.map(buildPoint) } };
-    case 'RECTANGLE': return { $discriminator: 'GeometryTypeEnum_RECTANGLE', rectangle: { points: closeRing(geometry.points).map(buildPoint) } };
-    case 'POLYGON': return { $discriminator: 'GeometryTypeEnum_POLYGON', polygon: { points: closeRing(geometry.points).map(buildPoint) } };
+    case 'POINT': return { $discriminator: 'GeometryTypeEnum_POINT', point: buildGeometryPoint(geometry.point) };
+    case 'CIRCLE': return { $discriminator: 'GeometryTypeEnum_CIRCLE', circle: { centre: buildGeometryPoint(geometry.centre), radius: geometry.radiusMeters } };
+    case 'LINE': return { $discriminator: 'GeometryTypeEnum_LINE', line: { points: geometry.points.map(buildGeometryPoint) } };
+    case 'RECTANGLE': return { $discriminator: 'GeometryTypeEnum_RECTANGLE', rectangle: { points: closeRing(geometry.points).map(buildGeometryPoint) } };
+    case 'POLYGON': return { $discriminator: 'GeometryTypeEnum_POLYGON', polygon: { points: closeRing(geometry.points).map(buildGeometryPoint) } };
     case 'CORRIDOR':
       return {
         $discriminator: 'GeometryTypeEnum_CORRIDOR',
-        corridor_area: { center_line: geometry.centreLine.map(buildPoint), width: geometry.widthMeters },
+        corridor_area: { center_line: geometry.centreLine.map(buildGeometryPoint), width: geometry.widthMeters },
       };
   }
 }
 
-function buildPoint(point: GeoPoint): unknown {
+function buildGeometryPoint(point: GeoPoint): unknown {
+  return {
+    latitude: point.latitude,
+    longitude: point.longitude,
+    altitude: point.altitude ?? 0,
+  };
+}
+
+function buildPositionValue(point: GeoPoint): unknown {
   return {
     latitude: point.latitude,
     longitude: point.longitude,
