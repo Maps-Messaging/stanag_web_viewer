@@ -253,17 +253,44 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
     };
   }
 
-  const key = task.type.toLowerCase();
-  return {
-    $discriminator: discriminator,
-    [key]: {
-      location: {
-        identifier: createUuid(),
-        timestamp,
-        location: buildLocationGeometry(task.geometry),
+  if (task.type === 'NAVIGATE') {
+    const points = task.geometry.type === 'POINT'
+      ? [task.geometry.point]
+      : task.geometry.type === 'LINE'
+        ? task.geometry.points
+        : undefined;
+
+    if (!points) {
+      throw new Error(`NAVIGATE does not support ${task.geometry.type} geometry`);
+    }
+
+    return {
+      $discriminator: discriminator,
+      navigate: {
+        route: {
+          points: points.map(buildGeometryPoint),
+        },
       },
-    },
-  };
+    };
+  }
+
+  if (task.type === 'REPOSITION' && task.geometry.type === 'POINT') {
+    return {
+      $discriminator: discriminator,
+      reposition: {
+        location: {
+          identifier: createUuid(),
+          timestamp,
+          location: {
+            $discriminator: 'GeometryTypeEnum_POINT',
+            point: buildGeometryPoint(task.geometry.point),
+          },
+        },
+      },
+    };
+  }
+
+  throw new Error(`${task.type} does not support ${task.geometry.type} geometry`);
 }
 
 function buildPositionUnion(point: GeoPoint): unknown {
@@ -430,7 +457,22 @@ function parseTaskGeometry(description: Record<string, unknown>): TaskGeometry {
 
   const position = findDiscriminator(description, (value) => value === 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE');
   if (position) return { type: 'POINT', point: parsePoint(position.latitude_longitude_altitude) };
+
+  const route = findRoutePoints(description);
+  if (route) {
+    return route.length === 1
+      ? { type: 'POINT', point: route[0] }
+      : { type: 'LINE', points: route };
+  }
+
   throw new Error('Task description does not contain a supported geometry');
+}
+
+function findRoutePoints(description: Record<string, unknown>): GeoPoint[] | undefined {
+  const navigate = optionalObject(description.navigate);
+  const route = optionalObject(navigate?.route);
+  if (!route || !Array.isArray(route.points)) return undefined;
+  return parsePoints(route.points, 1, 'navigate.route.points');
 }
 
 function parseGeometry(value: Record<string, unknown>): TaskGeometry {
