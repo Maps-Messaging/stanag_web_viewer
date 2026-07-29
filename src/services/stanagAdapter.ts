@@ -225,7 +225,12 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
     return {
       $discriminator: discriminator,
       loiter: {
-        pose: buildPositionUnion(task.geometry.point),
+        pose: {
+          $discriminator: 'ValueTypeEnum_POSE',
+          pose: {
+            position: buildPositionUnion(task.geometry.point),
+          },
+        },
       },
     };
   }
