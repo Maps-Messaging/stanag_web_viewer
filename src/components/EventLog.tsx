@@ -19,10 +19,12 @@ export function EventLog() {
 }
 
 const EventLogRow = memo(function EventLogRow({ event }: { event: EventLogEntry }) {
+  const eventDate = new Date(event.timestamp);
+
   return (
     <div className="event-log-entry">
-      <time className="event-log-entry__time" dateTime={new Date(event.timestamp).toISOString()}>
-        {new Date(event.timestamp).toLocaleTimeString()}
+      <time className="event-log-entry__time" dateTime={eventDate.toISOString()}>
+        {eventDate.toLocaleTimeString()}
       </time>
       <span className={`event-log-entry__level event-log-entry__level--${event.level.toLowerCase()}`}>
         {event.level}
