@@ -13,11 +13,20 @@ export function ConnectionBar({ onOpenSettings }: Props) {
 
   return (
     <AppBar position="static" elevation={0}>
-      <Toolbar variant="dense">
-        <Typography variant="h6" sx={{ flexGrow: 1 }}>STANAG Drone Demo</Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <CircleIcon color={connected ? 'success' : 'error'} sx={{ fontSize: 14 }} />
-          <Typography variant="body2">{message}</Typography>
+      <Toolbar
+        variant="dense"
+        sx={{
+          gap: 1,
+          flexWrap: { xs: 'wrap', sm: 'nowrap' },
+          py: { xs: 0.5, sm: 0 },
+        }}
+      >
+        <Typography variant="h6" sx={{ flexGrow: 1, minWidth: { xs: '100%', sm: 0 } }}>
+          STANAG Drone Demo
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+          <CircleIcon color={connected ? 'success' : 'error'} sx={{ fontSize: 14, flex: '0 0 auto' }} />
+          <Typography variant="body2" noWrap sx={{ minWidth: 0 }}>{message}</Typography>
           <IconButton color="inherit" onClick={onOpenSettings} aria-label="Open settings">
             <SettingsIcon />
           </IconButton>
