@@ -276,7 +276,7 @@ function buildVolumeTask(geometry: TaskGeometry, timestamp: string): unknown {
 }
 
 function buildSensingVolumeTask(geometry: TaskGeometry, timestamp: string): unknown {
-  return { sensor_type: 'SensingModeEnum_EO', volume: buildLabeledVolume(geometry, timestamp) };
+  return { sensor_type: 'SensingModeEnum_PASSIVE', volume: buildLabeledVolume(geometry, timestamp) };
 }
 
 function buildLabeledVolume(geometry: TaskGeometry, timestamp: string): unknown {
