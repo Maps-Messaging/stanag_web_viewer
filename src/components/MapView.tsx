@@ -46,20 +46,62 @@ export function MapView() {
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
-    const renderDrones = () => {
-      const state = useAppStore.getState();
-      updateDroneMarkers(map, state.drones, state.selectedDroneId, markersRef.current, tracksRef.current);
-      updateDroneTrackSource(map, tracksRef.current);
-      updateDroneMovementSource(map, Object.values(state.drones));
+    let mapLoaded = false;
+    let droneRenderFrame: number | undefined;
+    let droneSourcesDirty = false;
+    const pendingDroneIds = new Set<string>();
+
+    const scheduleDroneRender = () => {
+      if (!mapLoaded || droneRenderFrame !== undefined) return;
+
+      droneRenderFrame = globalThis.requestAnimationFrame(() => {
+        droneRenderFrame = undefined;
+        const state = useAppStore.getState();
+        const changedDroneIds = Array.from(pendingDroneIds);
+        pendingDroneIds.clear();
+
+        updateDroneMarkers(
+          map,
+          state.drones,
+          state.selectedDroneId,
+          changedDroneIds,
+          markersRef.current,
+          tracksRef.current,
+        );
+
+        if (droneSourcesDirty) {
+          droneSourcesDirty = false;
+          updateDroneTrackSource(map, tracksRef.current);
+          updateDroneMovementSource(map, Object.values(state.drones));
+        }
+      });
     };
 
     const unsubscribe = useAppStore.subscribe((state, previous) => {
-      if (state.drones !== previous.drones || state.selectedDroneId !== previous.selectedDroneId) renderDrones();
+      if (state.drones !== previous.drones) {
+        const droneIds = new Set([...Object.keys(state.drones), ...Object.keys(previous.drones)]);
+        droneIds.forEach((droneId) => {
+          if (state.drones[droneId] !== previous.drones[droneId]) {
+            pendingDroneIds.add(droneId);
+          }
+        });
+        droneSourcesDirty = true;
+      }
+
+      if (state.selectedDroneId !== previous.selectedDroneId) {
+        if (previous.selectedDroneId) pendingDroneIds.add(previous.selectedDroneId);
+        if (state.selectedDroneId) pendingDroneIds.add(state.selectedDroneId);
+      }
+
+      scheduleDroneRender();
     });
 
     map.on('load', () => {
       addSourcesAndLayers(map);
-      renderDrones();
+      mapLoaded = true;
+      Object.keys(useAppStore.getState().drones).forEach((droneId) => pendingDroneIds.add(droneId));
+      droneSourcesDirty = true;
+      scheduleDroneRender();
       updateTaskSource(map, Object.values(useAppStore.getState().tasks), useAppStore.getState().draftPoints, useAppStore.getState().taskType);
 
       TASK_LAYERS.forEach((layer) => {
@@ -86,6 +128,9 @@ export function MapView() {
 
     return () => {
       unsubscribe();
+      if (droneRenderFrame !== undefined) {
+        globalThis.cancelAnimationFrame(droneRenderFrame);
+      }
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current.clear();
       tracksRef.current.clear();
@@ -177,20 +222,29 @@ function updateDroneMarkers(
   map: MapLibreMap,
   drones: Record<string, Drone>,
   selectedDroneId: string | undefined,
+  droneIds: Iterable<string>,
   markers: globalThis.Map<string, maplibregl.Marker>,
   tracks: globalThis.Map<string, GeoPoint[]>,
 ): void {
-  Object.keys(drones).forEach((droneId) => {
+  for (const droneId of droneIds) {
     const drone = drones[droneId];
     const existing = markers.get(droneId);
-    if (!drone.position) return;
+
+    if (!drone?.position) {
+      existing?.remove();
+      markers.delete(droneId);
+      tracks.delete(droneId);
+      continue;
+    }
+
     appendTrackPoint(tracks, droneId, drone.position);
 
     if (existing) {
       existing.setLngLat([drone.position.longitude, drone.position.latitude]);
       existing.setRotation(drone.heading);
       existing.getElement().dataset.selected = String(droneId === selectedDroneId);
-      return;
+      existing.getElement().title = drone.name;
+      continue;
     }
 
     const element = document.createElement('button');
@@ -207,15 +261,7 @@ function updateDroneMarkers(
     markers.set(droneId, new maplibregl.Marker({ element, rotationAlignment: 'map', rotation: drone.heading })
       .setLngLat([drone.position.longitude, drone.position.latitude])
       .addTo(map));
-  });
-
-  Array.from(markers.keys()).forEach((droneId) => {
-    if (!drones[droneId]?.position) {
-      markers.get(droneId)?.remove();
-      markers.delete(droneId);
-      tracks.delete(droneId);
-    }
-  });
+  }
 }
 
 function appendTrackPoint(tracks: globalThis.Map<string, GeoPoint[]>, droneId: string, point: GeoPoint): void {
