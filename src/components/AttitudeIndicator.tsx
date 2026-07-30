@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { memo, type CSSProperties } from 'react';
 
 interface AttitudeIndicatorProps {
   rollDegrees?: number;
@@ -7,7 +7,7 @@ interface AttitudeIndicatorProps {
   size?: number;
 }
 
-export function AttitudeIndicator({
+export const AttitudeIndicator = memo(function AttitudeIndicator({
   rollDegrees = 0,
   pitchDegrees = 0,
   altitudeMeters,
@@ -50,7 +50,7 @@ export function AttitudeIndicator({
       <span className="attitude-indicator__altitude">{formatAltitude(altitudeMeters)}</span>
     </div>
   );
-}
+});
 
 function formatAltitude(value: number | undefined): string {
   return value === undefined
