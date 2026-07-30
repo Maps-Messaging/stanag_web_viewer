@@ -19,6 +19,8 @@ const TASK_GEOMETRIES: Record<TaskType, TaskGeometryType[]> = {
   PATROL: ['CIRCLE', 'RECTANGLE', 'POLYGON', 'CORRIDOR'],
 };
 
+const TASK_TYPES: TaskType[] = ['REPOSITION', 'LOITER'];
+
 export function TaskPanel({ transport }: Props) {
   const selectedDroneId = useAppStore((state) => state.selectedDroneId);
   const selectedDrone = useAppStore((state) => selectedDroneId ? state.drones[selectedDroneId] : undefined);
@@ -53,6 +55,7 @@ export function TaskPanel({ transport }: Props) {
 
   const capability = selectedDrone?.capabilities.find((candidate) => normaliseTaskType(candidate.taskType) === taskType);
   const authorityGuid = capability?.authorities[0];
+  const taskGridColumns = getTaskGridColumnCount(TASK_TYPES.length);
   const allowedGeometries = taskType ? TASK_GEOMETRIES[taskType] : [];
   const effectiveGeometryType = taskType && allowedGeometries.includes(geometryType)
     ? geometryType
@@ -118,16 +121,27 @@ export function TaskPanel({ transport }: Props) {
 
       <Divider sx={{ my: 2 }} />
       <Typography variant="overline">Task</Typography>
-      {supportedTaskTypes.length > 0 && (
-        <ButtonGroup fullWidth sx={{ mb: 2 }}>
-          {supportedTaskTypes.map((type) => (
-            <Button key={type} variant={taskType === type ? 'contained' : 'outlined'} onClick={() => chooseTask(type)}>
-              {type}
-            </Button>
-          ))}
-        </ButtonGroup>
-      )}
-
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${taskGridColumns}, minmax(0, 1fr))`,
+          gap: 1,
+          mb: 2,
+        }}
+      >
+        {TASK_TYPES.map((type) => (
+          <Button
+            key={type}
+            fullWidth
+            variant={taskType === type ? 'contained' : 'outlined'}
+            disabled={Boolean(selectedDrone) && !supportedTaskTypes.includes(type)}
+            onClick={() => chooseTask(type)}
+            sx={{ minWidth: 0 }}
+          >
+            {type}
+          </Button>
+        ))}
+      </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         {taskType && effectiveGeometryType ? geometryInstruction(effectiveGeometryType) : 'Choose an advertised task type.'}
       </Typography>
@@ -187,6 +201,13 @@ export function TaskPanel({ transport }: Props) {
       ) : <Typography variant="body2" color="text.secondary">No task for this drone.</Typography>}
     </Paper>
   );
+}
+
+function getTaskGridColumnCount(taskCount: number): number {
+  if (taskCount <= 0) return 1;
+  if (taskCount <= 3) return taskCount;
+  if (taskCount === 4) return 2;
+  return 3;
 }
 
 function normaliseTaskType(value: string): string { return value.replace('TaskTypeEnum_', ''); }
