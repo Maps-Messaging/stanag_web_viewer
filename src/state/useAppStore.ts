@@ -15,6 +15,7 @@ import { createUuid } from '../services/uuid';
 interface AppState {
   drones: Record<string, Drone>;
   tasks: Record<string, DroneTask>;
+  latestTaskIdByDrone: Record<string, string>;
   events: EventLogEntry[];
   selectedDroneId?: string;
   taskType?: TaskType;
@@ -63,9 +64,12 @@ const ACTIVE_TASK_STATES: DroneTask['state'][] = [
   'CANCEL_REQUESTED',
 ];
 
+const MAX_TASK_HISTORY_PER_DRONE = 100;
+
 export const useAppStore = create<AppState>((set) => ({
   drones: {},
   tasks: {},
+  latestTaskIdByDrone: {},
   events: [],
   draftPoints: [],
   connected: false,
@@ -140,22 +144,45 @@ export const useAppStore = create<AppState>((set) => ({
 
   upsertTask: (task) =>
     set((state) => {
-      const tasks = {
+      const tasks: Record<string, DroneTask> = {
         ...state.tasks,
         [task.id]: task,
       };
+      const droneTasks = Object.values(tasks)
+        .filter((candidate) => candidate.droneId === task.droneId)
+        .sort((left, right) => right.updatedAt - left.updatedAt);
+      const retainedTaskIds = new Set(
+        droneTasks
+          .filter((candidate, index) => index < MAX_TASK_HISTORY_PER_DRONE || ACTIVE_TASK_STATES.includes(candidate.state))
+          .map((candidate) => candidate.id),
+      );
+
+      droneTasks.forEach((candidate) => {
+        if (!retainedTaskIds.has(candidate.id)) {
+          delete tasks[candidate.id];
+        }
+      });
+
+      const retainedDroneTasks = droneTasks.filter((candidate) => retainedTaskIds.has(candidate.id));
+      const latestTask = retainedDroneTasks[0];
+      const activeTask = retainedDroneTasks.find((candidate) => ACTIVE_TASK_STATES.includes(candidate.state));
+      const latestTaskIdByDrone = { ...state.latestTaskIdByDrone };
+
+      if (latestTask) {
+        latestTaskIdByDrone[task.droneId] = latestTask.id;
+      } else {
+        delete latestTaskIdByDrone[task.droneId];
+      }
+
       const drone = state.drones[task.droneId];
 
       if (!drone) {
-        return { tasks };
+        return { tasks, latestTaskIdByDrone };
       }
-
-      const activeTask = Object.values(tasks)
-        .filter((candidate) => candidate.droneId === task.droneId && ACTIVE_TASK_STATES.includes(candidate.state))
-        .sort((left, right) => right.updatedAt - left.updatedAt)[0];
 
       return {
         tasks,
+        latestTaskIdByDrone,
         drones: {
           ...state.drones,
           [drone.id]: {
