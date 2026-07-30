@@ -56,6 +56,13 @@ const initialConfiguration: BrokerConfiguration = {
   stanagVersion: env.VITE_STANAG_VERSION ?? '0.3.0',
 };
 
+const ACTIVE_TASK_STATES: DroneTask['state'][] = [
+  'SUBMITTED',
+  'ACCEPTED',
+  'EXECUTING',
+  'CANCEL_REQUESTED',
+];
+
 export const useAppStore = create<AppState>((set) => ({
   drones: {},
   tasks: {},
@@ -77,6 +84,7 @@ export const useAppStore = create<AppState>((set) => ({
             ...drone,
             position: drone.position ?? existing?.position,
             capabilities: drone.capabilities.length > 0 ? drone.capabilities : existing?.capabilities ?? [],
+            activeTaskId: existing?.activeTaskId,
           },
         },
       };
@@ -131,12 +139,32 @@ export const useAppStore = create<AppState>((set) => ({
     }),
 
   upsertTask: (task) =>
-    set((state) => ({
-      tasks: {
+    set((state) => {
+      const tasks = {
         ...state.tasks,
         [task.id]: task,
-      },
-    })),
+      };
+      const drone = state.drones[task.droneId];
+
+      if (!drone) {
+        return { tasks };
+      }
+
+      const activeTask = Object.values(tasks)
+        .filter((candidate) => candidate.droneId === task.droneId && ACTIVE_TASK_STATES.includes(candidate.state))
+        .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+
+      return {
+        tasks,
+        drones: {
+          ...state.drones,
+          [drone.id]: {
+            ...drone,
+            activeTaskId: activeTask?.id,
+          },
+        },
+      };
+    }),
 
   addEvent: (entry) =>
     set((state) => ({
@@ -163,9 +191,9 @@ export const useAppStore = create<AppState>((set) => ({
     }),
 
   addDraftPoint: (point) =>
-    set({
-      draftPoints: [point],
-    }),
+    set((state) => ({
+      draftPoints: [...state.draftPoints, point],
+    })),
 
   clearDraftPoints: () =>
     set({
