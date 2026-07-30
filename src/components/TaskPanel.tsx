@@ -11,13 +11,28 @@ import { useAppStore } from '../state/useAppStore';
 
 interface Props { transport?: MessageTransport; }
 
-const TASK_TYPES: TaskType[] = ['REPOSITION', 'LOITER', 'NAVIGATE', 'PATROL'];
+const TASK_TYPES: TaskType[] = [
+  'REPOSITION',
+  'NAVIGATE',
+  'PATROL',
+  'LOITER',
+  'STANDBY',
+  'DETECT',
+  'SURVEY',
+  'SCREEN',
+];
+
+const VOLUME_TASK_GEOMETRIES: TaskGeometryType[] = ['POINT', 'CIRCLE', 'POLYGON', 'CORRIDOR'];
 
 const TASK_GEOMETRIES: Record<TaskType, TaskGeometryType[]> = {
   REPOSITION: ['POINT'],
-  NAVIGATE: ['POINT'],
-  LOITER: ['POINT', 'CIRCLE'],
+  NAVIGATE: ['POINT', 'LINE'],
   PATROL: ['CIRCLE', 'RECTANGLE', 'POLYGON', 'CORRIDOR'],
+  LOITER: ['POINT', 'CIRCLE'],
+  STANDBY: VOLUME_TASK_GEOMETRIES,
+  DETECT: VOLUME_TASK_GEOMETRIES,
+  SURVEY: VOLUME_TASK_GEOMETRIES,
+  SCREEN: VOLUME_TASK_GEOMETRIES,
 };
 
 export function TaskPanel({ transport }: Props) {
