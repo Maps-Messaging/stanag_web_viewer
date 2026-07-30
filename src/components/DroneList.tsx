@@ -119,7 +119,7 @@ const DroneListItem = memo(function DroneListItem({
       onClick={() => selectDrone(row.id)}
       sx={{ alignItems: 'center', gap: 1.25, py: 1.25 }}
     >
-      <DroneAttitude droneId={droneId} />
+      <DroneLiveTelemetry droneId={droneId} />
 
       <Box sx={{ minWidth: 0, flex: 1 }}>
         <Stack direction="row" spacing={0.5} alignItems="center">
@@ -140,8 +140,6 @@ const DroneListItem = memo(function DroneListItem({
             </IconButton>
           </Tooltip>
         </Stack>
-
-        <DroneHeading droneId={droneId} />
 
         <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" sx={{ mt: 0.75 }}>
           {row.activeTaskLabel && <Chip size="small" color="primary" label={row.activeTaskLabel} />}
@@ -176,10 +174,11 @@ const DroneListItem = memo(function DroneListItem({
   );
 });
 
-const DroneAttitude = memo(function DroneAttitude({ droneId }: { droneId: string }) {
+const DroneLiveTelemetry = memo(function DroneLiveTelemetry({ droneId }: { droneId: string }) {
   const telemetry = useAppStore(useShallow((state) => {
     const drone = state.drones[droneId];
     return {
+      heading: drone?.heading ?? 0,
       roll: drone?.roll,
       pitch: drone?.pitch,
       altitude: drone?.position?.altitude,
@@ -187,21 +186,16 @@ const DroneAttitude = memo(function DroneAttitude({ droneId }: { droneId: string
   }));
 
   return (
-    <AttitudeIndicator
-      rollDegrees={telemetry.roll}
-      pitchDegrees={telemetry.pitch}
-      altitudeMeters={telemetry.altitude}
-    />
-  );
-});
-
-const DroneHeading = memo(function DroneHeading({ droneId }: { droneId: string }) {
-  const heading = useAppStore((state) => state.drones[droneId]?.heading ?? 0);
-
-  return (
-    <div className="drone-heading">
-      <span className="drone-heading__arrow" style={{ transform: `rotate(${heading}deg)` }}>▲</span>
-      <span>{formatHeading(heading)}</span>
+    <div className="drone-live-telemetry">
+      <AttitudeIndicator
+        rollDegrees={telemetry.roll}
+        pitchDegrees={telemetry.pitch}
+        altitudeMeters={telemetry.altitude}
+      />
+      <div className="drone-heading">
+        <span className="drone-heading__arrow" style={{ transform: `rotate(${telemetry.heading}deg)` }}>▲</span>
+        <span>{formatHeading(telemetry.heading)}</span>
+      </div>
     </div>
   );
 });
