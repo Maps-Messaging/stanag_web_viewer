@@ -1,7 +1,7 @@
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import SendIcon from '@mui/icons-material/Send';
-import { Alert, Box, Button, ButtonGroup, Divider, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Divider, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useMemo, useState } from 'react';
 import type { DroneTask, TaskGeometryType, TaskType } from '../models/types';
 import type { MessageTransport } from '../messaging/transport';
@@ -11,6 +11,8 @@ import { useAppStore } from '../state/useAppStore';
 interface Props {
   transport?: MessageTransport;
 }
+
+const TASK_TYPES: TaskType[] = ['REPOSITION', 'LOITER'];
 
 export function TaskPanel({ transport }: Props) {
   const selectedDroneId = useAppStore((state) => state.selectedDroneId);
@@ -34,6 +36,7 @@ export function TaskPanel({ transport }: Props) {
   const capability = selectedDrone?.capabilities.find((candidate) => candidate.taskType === taskType);
   const authorityGuid = capability?.authorities[0];
   const canSubmit = Boolean(selectedDrone && taskType && draftPoints.length >= 1 && authorityGuid && transport);
+  const taskGridColumns = getTaskGridColumnCount(TASK_TYPES.length);
 
   function chooseTask(type: TaskType): void {
     selectTaskType(type);
@@ -91,18 +94,27 @@ export function TaskPanel({ transport }: Props) {
 
       <Divider sx={{ my: 2 }} />
       <Typography variant="overline">Task</Typography>
-      <ButtonGroup fullWidth sx={{ mb: 2 }}>
-        {(['REPOSITION', 'LOITER'] as TaskType[]).map((type) => (
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${taskGridColumns}, minmax(0, 1fr))`,
+          gap: 1,
+          mb: 2,
+        }}
+      >
+        {TASK_TYPES.map((type) => (
           <Button
             key={type}
+            fullWidth
             variant={taskType === type ? 'contained' : 'outlined'}
             disabled={Boolean(selectedDrone) && !supportedTaskTypes.includes(type)}
             onClick={() => chooseTask(type)}
+            sx={{ minWidth: 0 }}
           >
             {type}
           </Button>
         ))}
-      </ButtonGroup>
+      </Box>
 
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         {taskType ? 'Click the destination or loiter centre on the map.' : 'Choose a task type.'}
@@ -154,6 +166,13 @@ export function TaskPanel({ transport }: Props) {
       )}
     </Paper>
   );
+}
+
+function getTaskGridColumnCount(taskCount: number): number {
+  if (taskCount <= 0) return 1;
+  if (taskCount <= 3) return taskCount;
+  if (taskCount === 4) return 2;
+  return 3;
 }
 
 function taskSeverity(state: DroneTask['state']): 'success' | 'info' | 'warning' | 'error' {
