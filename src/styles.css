@@ -47,6 +47,14 @@ html, body, #root {
   height: 40px;
 }
 
+.drone-live-telemetry {
+  display: flex;
+  flex: 0 0 58px;
+  flex-direction: column;
+  align-items: center;
+  min-width: 58px;
+}
+
 .attitude-indicator {
   display: flex;
   flex: 0 0 auto;
@@ -145,16 +153,18 @@ html, body, #root {
 .drone-heading {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 4px;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 5px;
   color: rgb(255 255 255 / 70%);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .drone-heading__arrow {
   display: inline-block;
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1;
   transform-origin: center;
   will-change: transform;
