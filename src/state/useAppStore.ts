@@ -29,6 +29,7 @@ interface AppState {
   upsertDrone: (drone: Drone) => void;
   upsertDetection: (detection: Detection) => void;
   removeDetection: (detectionId: string) => void;
+  purgeExpiredDetections: (now?: number) => void;
   updateDroneTelemetry: (droneId: string, telemetry: DroneTelemetryUpdate) => void;
   updateMavlinkStreamStatus: (systemId: number, status: MavlinkStreamStatus) => void;
   upsertTask: (task: DroneTask) => void;
@@ -65,9 +66,12 @@ const initialConfiguration: BrokerConfiguration = {
 
 const ACTIVE_TASK_STATES: DroneTask['state'][] = [
   'SUBMITTED',
+  'PENDING',
   'ACCEPTED',
+  'ACTIVE',
   'EXECUTING',
   'CANCEL_REQUESTED',
+  'PREEMPTING',
 ];
 
 const MAX_TASK_HISTORY_PER_DRONE = 100;
@@ -102,14 +106,12 @@ export const useAppStore = create<AppState>((set) => ({
     }),
 
   upsertDetection: (detection) =>
-    set((state) => {
-      const now = Date.now();
-      const detections = Object.fromEntries(
-        Object.entries(state.detections).filter(([, candidate]) => candidate.validUntil === undefined || candidate.validUntil >= now),
-      );
-      detections[detection.id] = { ...detections[detection.id], ...detection };
-      return { detections };
-    }),
+    set((state) => ({
+      detections: {
+        ...Object.fromEntries(Object.entries(state.detections).filter(([, candidate]) => candidate.expiresAt > Date.now())),
+        [detection.id]: { ...state.detections[detection.id], ...detection },
+      },
+    })),
 
   removeDetection: (detectionId) =>
     set((state) => {
@@ -122,13 +124,24 @@ export const useAppStore = create<AppState>((set) => ({
       };
     }),
 
+  purgeExpiredDetections: (now = Date.now()) =>
+    set((state) => {
+      const detections = Object.fromEntries(
+        Object.entries(state.detections).filter(([, detection]) => detection.expiresAt > now),
+      );
+      if (Object.keys(detections).length === Object.keys(state.detections).length) return state;
+      return {
+        detections,
+        selectedDetectionId: state.selectedDetectionId && detections[state.selectedDetectionId]
+          ? state.selectedDetectionId
+          : undefined,
+      };
+    }),
+
   updateDroneTelemetry: (droneId, telemetry) =>
     set((state) => {
       const existing = state.drones[droneId];
-
-      if (!existing) {
-        return state;
-      }
+      if (!existing) return state;
 
       return {
         drones: {
@@ -137,10 +150,7 @@ export const useAppStore = create<AppState>((set) => ({
             ...existing,
             ...telemetry,
             position: telemetry.position
-              ? {
-                  ...existing.position,
-                  ...telemetry.position,
-                }
+              ? { ...existing.position, ...telemetry.position }
               : existing.position,
           },
         },
@@ -149,33 +159,21 @@ export const useAppStore = create<AppState>((set) => ({
 
   updateMavlinkStreamStatus: (systemId, status) =>
     set((state) => {
-      const matches = Object.values(state.drones).filter(
-        (drone) => drone.twin?.systemId === systemId,
-      );
-
-      if (matches.length !== 1) {
-        return state;
-      }
-
+      const matches = Object.values(state.drones).filter((drone) => drone.twin?.systemId === systemId);
+      if (matches.length !== 1) return state;
       const drone = matches[0];
 
       return {
         drones: {
           ...state.drones,
-          [drone.id]: {
-            ...drone,
-            mavlinkStreamStatus: status,
-          },
+          [drone.id]: { ...drone, mavlinkStreamStatus: status },
         },
       };
     }),
 
   upsertTask: (task) =>
     set((state) => {
-      const tasks: Record<string, DroneTask> = {
-        ...state.tasks,
-        [task.id]: task,
-      };
+      const tasks: Record<string, DroneTask> = { ...state.tasks, [task.id]: task };
       const droneTasks = Object.values(tasks)
         .filter((candidate) => candidate.droneId === task.droneId)
         .sort((left, right) => right.updatedAt - left.updatedAt);
@@ -186,9 +184,7 @@ export const useAppStore = create<AppState>((set) => ({
       );
 
       droneTasks.forEach((candidate) => {
-        if (!retainedTaskIds.has(candidate.id)) {
-          delete tasks[candidate.id];
-        }
+        if (!retainedTaskIds.has(candidate.id)) delete tasks[candidate.id];
       });
 
       const retainedDroneTasks = droneTasks.filter((candidate) => retainedTaskIds.has(candidate.id));
@@ -196,77 +192,42 @@ export const useAppStore = create<AppState>((set) => ({
       const activeTask = retainedDroneTasks.find((candidate) => ACTIVE_TASK_STATES.includes(candidate.state));
       const latestTaskIdByDrone = { ...state.latestTaskIdByDrone };
 
-      if (latestTask) {
-        latestTaskIdByDrone[task.droneId] = latestTask.id;
-      } else {
-        delete latestTaskIdByDrone[task.droneId];
-      }
+      if (latestTask) latestTaskIdByDrone[task.droneId] = latestTask.id;
+      else delete latestTaskIdByDrone[task.droneId];
 
       const drone = state.drones[task.droneId];
-
-      if (!drone) {
-        return { tasks, latestTaskIdByDrone };
-      }
+      if (!drone) return { tasks, latestTaskIdByDrone };
 
       return {
         tasks,
         latestTaskIdByDrone,
         drones: {
           ...state.drones,
-          [drone.id]: {
-            ...drone,
-            activeTaskId: activeTask?.id,
-          },
+          [drone.id]: { ...drone, activeTaskId: activeTask?.id },
         },
       };
     }),
 
   addEvent: (entry) =>
     set((state) => ({
-      events: [
-        {
-          ...entry,
-          id: createUuid(),
-          timestamp: Date.now(),
-        },
-        ...state.events,
-      ].slice(0, 100),
+      events: [{ ...entry, id: createUuid(), timestamp: Date.now() }, ...state.events].slice(0, 100),
     })),
 
   selectDrone: (selectedDroneId) =>
-    set({
-      selectedDroneId,
-      selectedDetectionId: undefined,
-      draftPoints: [],
-    }),
+    set({ selectedDroneId, selectedDetectionId: undefined, draftPoints: [] }),
 
   selectDetection: (selectedDetectionId) =>
     set({ selectedDetectionId, selectedDroneId: undefined, draftPoints: [] }),
 
   selectTaskType: (taskType) =>
-    set({
-      taskType,
-      draftPoints: [],
-    }),
+    set({ taskType, draftPoints: [] }),
 
   addDraftPoint: (point) =>
-    set((state) => ({
-      draftPoints: [...state.draftPoints, point],
-    })),
+    set((state) => ({ draftPoints: [...state.draftPoints, point] })),
 
-  clearDraftPoints: () =>
-    set({
-      draftPoints: [],
-    }),
+  clearDraftPoints: () => set({ draftPoints: [] }),
 
-  setConnection: (connected, connectionMessage) =>
-    set({
-      connected,
-      connectionMessage,
-    }),
+  setConnection: (connected, connectionMessage) => set({ connected, connectionMessage }),
 
-  updateConfiguration: (configuration) =>
-    set({
-      configuration,
-    }),
+  updateConfiguration: (configuration) => set({ configuration }),
 }));
