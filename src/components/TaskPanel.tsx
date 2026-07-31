@@ -22,7 +22,7 @@ const TASK_TYPES: TaskType[] = [
   'SCREEN',
 ];
 
-const VOLUME_TASK_GEOMETRIES: TaskGeometryType[] = ['POINT', 'CIRCLE', 'POLYGON', 'CORRIDOR'];
+const VOLUME_TASK_GEOMETRIES: TaskGeometryType[] = ['CIRCLE', 'RECTANGLE', 'POLYGON', 'CORRIDOR'];
 
 const TASK_GEOMETRIES: Record<TaskType, TaskGeometryType[]> = {
   REPOSITION: ['POINT'],
