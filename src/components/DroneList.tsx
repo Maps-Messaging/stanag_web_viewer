@@ -95,6 +95,8 @@ const DroneListItem = memo(function DroneListItem({
 
   if (!row) return null;
 
+  const rowId = row.id;
+  const rowName = row.name;
   const detectDisabled = detecting || !row.connected || row.systemId === undefined;
   const detectTooltip = row.systemId === undefined
     ? 'MAVLink system ID unavailable'
@@ -105,9 +107,9 @@ const DroneListItem = memo(function DroneListItem({
   async function detect(): Promise<void> {
     setDetecting(true);
     try {
-      await onDetect(row.id);
+      await onDetect(rowId);
     } catch (error) {
-      addEvent({ level: 'ERROR', message: `Detect failed for ${row.name}: ${String(error)}` });
+      addEvent({ level: 'ERROR', message: `Detect failed for ${rowName}: ${String(error)}` });
     } finally {
       setDetecting(false);
     }
