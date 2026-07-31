@@ -1,4 +1,5 @@
 import type { DroneTask, DroneTelemetryUpdate, GeoPoint, MavlinkSequenceStatus, MavlinkStreamStatus, TwinState } from '../models/types';
+import { parseDynamicTrack } from '../services/dynamicUpdateAdapter';
 import { getStanagMessageType, parseNodeMessage, parseTaskAdmin, parseTaskStatus } from '../services/stanagAdapter';
 import { useAppStore } from '../state/useAppStore';
 
@@ -18,6 +19,25 @@ export function dispatchStanagMessage(payload: unknown): void {
       });
     }
 
+    return;
+  }
+
+  if (messageType === 'MessageTypeEnum_DYNAMIC_UPDATE') {
+    try {
+      const detection = parseDynamicTrack(payload);
+      store.upsertDetection(detection);
+      store.addEvent({
+        level: 'INFO',
+        message: `DYNAMIC_UPDATE TRACK: ${detection.name} ${detection.id}`,
+        payload,
+      });
+    } catch (error) {
+      store.addEvent({
+        level: 'WARN',
+        message: `Unsupported DYNAMIC_UPDATE: ${error instanceof Error ? error.message : String(error)}`,
+        payload,
+      });
+    }
     return;
   }
 

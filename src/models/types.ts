@@ -58,6 +58,31 @@ export interface Drone {
   mavlinkStreamStatus?: MavlinkStreamStatus;
 }
 
+export interface Detection {
+  id: string;
+  sourceId: string;
+  name: string;
+  position: GeoPoint;
+  description?: string;
+  organization?: string;
+  nationality?: string;
+  contextType?: string;
+  standardIdentity?: string;
+  symbolSet?: string;
+  entityStatus?: string;
+  entity?: string;
+  entityType?: string;
+  entitySubtype?: string;
+  sector1?: string;
+  sector2?: string;
+  trackPhase?: string;
+  timestamp: number;
+  initiatedAt?: number;
+  validUntil?: number;
+  rtspUrl?: string;
+  raw?: unknown;
+}
+
 export interface DroneTelemetryUpdate {
   position?: GeoPoint; heading?: number; roll?: number; pitch?: number; yaw?: number; groundSpeed?: number; course?: number;
   climbRate?: number; lastSeen?: number; twin?: TwinState; mavlinkStreamStatus?: MavlinkStreamStatus;
