@@ -53,6 +53,17 @@ export function MapView() {
     });
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }), 'bottom-left');
+
+    const detectionExpiryTimer = globalThis.setInterval(() => {
+      const state = useAppStore.getState();
+      const now = Date.now();
+      Object.values(state.detections).forEach((detection) => {
+        if (detection.validUntil !== undefined && detection.validUntil <= now) {
+          state.removeDetection(detection.id);
+        }
+      });
+    }, 1_000);
 
     let mapLoaded = false;
     let droneRenderFrame: number | undefined;
@@ -159,6 +170,7 @@ export function MapView() {
 
     return () => {
       unsubscribe();
+      globalThis.clearInterval(detectionExpiryTimer);
       if (droneRenderFrame !== undefined) globalThis.cancelAnimationFrame(droneRenderFrame);
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current.clear();
@@ -187,96 +199,16 @@ function addSourcesAndLayers(map: MapLibreMap): void {
   map.addSource(DETECTION_SOURCE, { type: 'geojson', data: emptyFeatureCollection() });
   map.addSource(TASK_GEOMETRY_SOURCE, { type: 'geojson', data: emptyFeatureCollection() });
 
-  map.addLayer({
-    id: 'collision-warning-fill',
-    type: 'fill',
-    source: COLLISION_WARNING_SOURCE,
-    paint: { 'fill-color': '#ff1744', 'fill-opacity': 0.16 },
-  });
-  map.addLayer({
-    id: 'collision-warning-outline',
-    type: 'line',
-    source: COLLISION_WARNING_SOURCE,
-    paint: { 'line-color': '#d50000', 'line-width': 3, 'line-opacity': 0.9 },
-  });
-  map.addLayer({
-    id: 'drone-tracks',
-    type: 'line',
-    source: DRONE_TRACK_SOURCE,
-    paint: { 'line-width': 3, 'line-opacity': 0.65, 'line-color': '#1976d2' },
-  });
-  map.addLayer({
-    id: 'drone-movement-lines',
-    type: 'line',
-    source: DRONE_MOVEMENT_SOURCE,
-    paint: { 'line-width': 3, 'line-opacity': 0.9, 'line-color': '#00c853' },
-  });
-  map.addLayer({
-    id: 'detection-points',
-    type: 'circle',
-    source: DETECTION_SOURCE,
-    paint: {
-      'circle-radius': 9,
-      'circle-color': '#8e24aa',
-      'circle-stroke-width': 3,
-      'circle-stroke-color': '#ffffff',
-    },
-  });
-  map.addLayer({
-    id: 'detection-labels',
-    type: 'symbol',
-    source: DETECTION_SOURCE,
-    layout: {
-      'text-field': ['get', 'name'],
-      'text-offset': [0, 1.4],
-      'text-size': 12,
-      'text-anchor': 'top',
-    },
-    paint: { 'text-color': '#4a148c', 'text-halo-color': '#ffffff', 'text-halo-width': 2 },
-  });
-  map.addLayer({
-    id: 'task-volume-fill',
-    type: 'fill',
-    source: TASK_GEOMETRY_SOURCE,
-    paint: {
-      'fill-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'],
-      'fill-opacity': 0.16,
-    },
-    filter: ['==', '$type', 'Polygon'],
-  });
-  map.addLayer({
-    id: 'task-volume-outline',
-    type: 'line',
-    source: TASK_GEOMETRY_SOURCE,
-    paint: {
-      'line-width': 3,
-      'line-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'],
-    },
-    filter: ['==', '$type', 'Polygon'],
-  });
-  map.addLayer({
-    id: 'task-lines',
-    type: 'line',
-    source: TASK_GEOMETRY_SOURCE,
-    paint: {
-      'line-width': 4,
-      'line-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'],
-      'line-dasharray': ['case', ['==', ['get', 'kind'], 'draft'], ['literal', [2, 1]], ['literal', [1, 0]]],
-    },
-    filter: ['==', '$type', 'LineString'],
-  });
-  map.addLayer({
-    id: 'task-points',
-    type: 'circle',
-    source: TASK_GEOMETRY_SOURCE,
-    paint: {
-      'circle-radius': ['case', ['==', ['get', 'kind'], 'draft'], 7, 9],
-      'circle-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'],
-      'circle-stroke-width': 2,
-      'circle-stroke-color': '#111',
-    },
-    filter: ['==', '$type', 'Point'],
-  });
+  map.addLayer({ id: 'collision-warning-fill', type: 'fill', source: COLLISION_WARNING_SOURCE, paint: { 'fill-color': '#ff1744', 'fill-opacity': 0.16 } });
+  map.addLayer({ id: 'collision-warning-outline', type: 'line', source: COLLISION_WARNING_SOURCE, paint: { 'line-color': '#d50000', 'line-width': 3, 'line-opacity': 0.9 } });
+  map.addLayer({ id: 'drone-tracks', type: 'line', source: DRONE_TRACK_SOURCE, paint: { 'line-width': 3, 'line-opacity': 0.65, 'line-color': '#1976d2' } });
+  map.addLayer({ id: 'drone-movement-lines', type: 'line', source: DRONE_MOVEMENT_SOURCE, paint: { 'line-width': 3, 'line-opacity': 0.9, 'line-color': '#00c853' } });
+  map.addLayer({ id: 'detection-points', type: 'circle', source: DETECTION_SOURCE, paint: { 'circle-radius': 9, 'circle-color': '#8e24aa', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } });
+  map.addLayer({ id: 'detection-labels', type: 'symbol', source: DETECTION_SOURCE, layout: { 'text-field': ['get', 'name'], 'text-offset': [0, 1.4], 'text-size': 12, 'text-anchor': 'top' }, paint: { 'text-color': '#4a148c', 'text-halo-color': '#ffffff', 'text-halo-width': 2 } });
+  map.addLayer({ id: 'task-volume-fill', type: 'fill', source: TASK_GEOMETRY_SOURCE, paint: { 'fill-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'], 'fill-opacity': 0.16 }, filter: ['==', '$type', 'Polygon'] });
+  map.addLayer({ id: 'task-volume-outline', type: 'line', source: TASK_GEOMETRY_SOURCE, paint: { 'line-width': 3, 'line-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'] }, filter: ['==', '$type', 'Polygon'] });
+  map.addLayer({ id: 'task-lines', type: 'line', source: TASK_GEOMETRY_SOURCE, paint: { 'line-width': 4, 'line-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'], 'line-dasharray': ['case', ['==', ['get', 'kind'], 'draft'], ['literal', [2, 1]], ['literal', [1, 0]]] }, filter: ['==', '$type', 'LineString'] });
+  map.addLayer({ id: 'task-points', type: 'circle', source: TASK_GEOMETRY_SOURCE, paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'draft'], 7, 9], 'circle-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'], 'circle-stroke-width': 2, 'circle-stroke-color': '#111' }, filter: ['==', '$type', 'Point'] });
 }
 
 function updateTaskSource(map: MapLibreMap, tasks: DroneTask[], draftPoints: GeoPoint[], taskType: string | undefined): void {
@@ -287,21 +219,19 @@ function updateTaskSource(map: MapLibreMap, tasks: DroneTask[], draftPoints: Geo
 function updateDetectionSource(map: MapLibreMap, detections: Detection[]): void {
   const source = map.getSource(DETECTION_SOURCE) as GeoJSONSource | undefined;
   const now = Date.now();
-  const features = detections
-    .filter((detection) => detection.validUntil === undefined || detection.validUntil >= now)
-    .map((detection) => pointFeature(detection.position, {
-      detectionId: detection.id,
-      name: detection.name,
-      sourceId: detection.sourceId,
-      identity: detection.standardIdentity,
-      symbolSet: detection.symbolSet,
-      organization: detection.organization,
-      nationality: detection.nationality,
-      trackPhase: detection.trackPhase,
-      timestamp: new Date(detection.timestamp).toISOString(),
-      validUntil: detection.validUntil === undefined ? undefined : new Date(detection.validUntil).toISOString(),
-      rtspUrl: detection.rtspUrl,
-    }));
+  const features = detections.filter((detection) => detection.validUntil === undefined || detection.validUntil >= now).map((detection) => pointFeature(detection.position, {
+    detectionId: detection.id,
+    name: detection.name,
+    sourceId: detection.sourceId,
+    identity: detection.standardIdentity,
+    symbolSet: detection.symbolSet,
+    organization: detection.organization,
+    nationality: detection.nationality,
+    trackPhase: detection.trackPhase,
+    timestamp: new Date(detection.timestamp).toISOString(),
+    validUntil: detection.validUntil === undefined ? undefined : new Date(detection.validUntil).toISOString(),
+    rtspUrl: detection.rtspUrl,
+  }));
   source?.setData({ type: 'FeatureCollection', features });
 }
 
@@ -309,7 +239,6 @@ function updateCollisionWarningSource(map: MapLibreMap, drones: Drone[]): void {
   const source = map.getSource(COLLISION_WARNING_SOURCE) as GeoJSONSource | undefined;
   const positioned = drones.filter((drone): drone is Drone & { position: GeoPoint } => Boolean(drone.position));
   const conflicts = new Map<string, { drone: Drone & { position: GeoPoint }; nearestName: string; nearestDistance: number }>();
-
   for (let leftIndex = 0; leftIndex < positioned.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < positioned.length; rightIndex += 1) {
       const left = positioned[leftIndex];
@@ -320,49 +249,32 @@ function updateCollisionWarningSource(map: MapLibreMap, drones: Drone[]): void {
       recordConflict(conflicts, right, left.name, distance);
     }
   }
-
-  const features = Array.from(conflicts.values()).map(({ drone, nearestName, nearestDistance }) =>
-    circleFeature(drone.position, COLLISION_WARNING_DISTANCE_METERS, {
-      droneId: drone.id,
-      droneName: drone.name,
-      nearestDrone: nearestName,
-      nearestDistanceMeters: Math.round(nearestDistance * 10) / 10,
-      thresholdMeters: COLLISION_WARNING_DISTANCE_METERS,
-    }));
+  const features = Array.from(conflicts.values()).map(({ drone, nearestName, nearestDistance }) => circleFeature(drone.position, COLLISION_WARNING_DISTANCE_METERS, {
+    droneId: drone.id,
+    droneName: drone.name,
+    nearestDrone: nearestName,
+    nearestDistanceMeters: Math.round(nearestDistance * 10) / 10,
+    thresholdMeters: COLLISION_WARNING_DISTANCE_METERS,
+  }));
   source?.setData({ type: 'FeatureCollection', features });
 }
 
-function recordConflict(
-  conflicts: Map<string, { drone: Drone & { position: GeoPoint }; nearestName: string; nearestDistance: number }>,
-  drone: Drone & { position: GeoPoint },
-  otherName: string,
-  distance: number,
-): void {
+function recordConflict(conflicts: Map<string, { drone: Drone & { position: GeoPoint }; nearestName: string; nearestDistance: number }>, drone: Drone & { position: GeoPoint }, otherName: string, distance: number): void {
   const existing = conflicts.get(drone.id);
   if (!existing || distance < existing.nearestDistance) conflicts.set(drone.id, { drone, nearestName: otherName, nearestDistance: distance });
 }
 
-function updateDroneMarkers(
-  map: MapLibreMap,
-  drones: Record<string, Drone>,
-  selectedDroneId: string | undefined,
-  droneIds: Iterable<string>,
-  markers: globalThis.Map<string, maplibregl.Marker>,
-  tracks: globalThis.Map<string, GeoPoint[]>,
-): void {
+function updateDroneMarkers(map: MapLibreMap, drones: Record<string, Drone>, selectedDroneId: string | undefined, droneIds: Iterable<string>, markers: globalThis.Map<string, maplibregl.Marker>, tracks: globalThis.Map<string, GeoPoint[]>): void {
   for (const droneId of droneIds) {
     const drone = drones[droneId];
     const existing = markers.get(droneId);
-
     if (!drone?.position) {
       existing?.remove();
       markers.delete(droneId);
       tracks.delete(droneId);
       continue;
     }
-
     appendTrackPoint(tracks, droneId, drone.position);
-
     if (existing) {
       existing.setLngLat([drone.position.longitude, drone.position.latitude]);
       existing.setRotation(drone.heading);
@@ -370,21 +282,14 @@ function updateDroneMarkers(
       existing.getElement().title = drone.name;
       continue;
     }
-
     const element = document.createElement('button');
     element.className = 'drone-marker';
     element.type = 'button';
     element.title = drone.name;
     element.dataset.selected = String(droneId === selectedDroneId);
     element.innerHTML = '▲';
-    element.addEventListener('click', (event) => {
-      event.stopPropagation();
-      useAppStore.getState().selectDrone(droneId);
-    });
-
-    markers.set(droneId, new maplibregl.Marker({ element, rotationAlignment: 'map', rotation: drone.heading })
-      .setLngLat([drone.position.longitude, drone.position.latitude])
-      .addTo(map));
+    element.addEventListener('click', (event) => { event.stopPropagation(); useAppStore.getState().selectDrone(droneId); });
+    markers.set(droneId, new maplibregl.Marker({ element, rotationAlignment: 'map', rotation: drone.heading }).setLngLat([drone.position.longitude, drone.position.latitude]).addTo(map));
   }
 }
 
@@ -398,9 +303,7 @@ function appendTrackPoint(tracks: globalThis.Map<string, GeoPoint[]>, droneId: s
 function updateDroneTrackSource(map: MapLibreMap, tracks: globalThis.Map<string, GeoPoint[]>): void {
   const source = map.getSource(DRONE_TRACK_SOURCE) as GeoJSONSource | undefined;
   const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-  tracks.forEach((points, droneId) => {
-    if (points.length >= 2) features.push(lineFeature(points, { droneId }));
-  });
+  tracks.forEach((points, droneId) => { if (points.length >= 2) features.push(lineFeature(points, { droneId })); });
   source?.setData({ type: 'FeatureCollection', features });
 }
 
@@ -416,23 +319,13 @@ function updateDroneMovementSource(map: MapLibreMap, drones: Drone[]): void {
 
 function buildTaskFeatures(tasks: DroneTask[], draftPoints: GeoPoint[], taskType: string | undefined): GeoJSON.Feature[] {
   const features: GeoJSON.Feature[] = [];
-
   if (taskType && draftPoints.length > 0) {
     draftPoints.forEach((point, index) => features.push(pointFeature(point, { kind: 'draft', label: `Draft point ${index + 1}`, taskType })));
     if (draftPoints.length >= 2) features.push(lineFeature(draftPoints, { kind: 'draft', label: `${taskType} draft`, taskType }));
   }
-
-  tasks
-    .filter((task) => !['COMPLETED', 'CANCELLED'].includes(task.state))
-    .forEach((task) => features.push(...geometryFeatures(task.geometry, {
-      kind: 'task',
-      label: `${task.type} ${task.geometry.type}`,
-      taskId: task.id,
-      taskType: task.type,
-      state: task.state,
-      percentComplete: task.percentComplete,
-    })));
-
+  tasks.filter((task) => !['COMPLETED', 'CANCELLED'].includes(task.state)).forEach((task) => features.push(...geometryFeatures(task.geometry, {
+    kind: 'task', label: `${task.type} ${task.geometry.type}`, taskId: task.id, taskType: task.type, state: task.state, percentComplete: task.percentComplete,
+  })));
   return features;
 }
 
@@ -448,34 +341,25 @@ function geometryFeatures(geometry: TaskGeometry, properties: Record<string, unk
 }
 
 function pointFeature(point: GeoPoint, properties: Record<string, unknown>): GeoJSON.Feature<GeoJSON.Point> {
-  return {
-    type: 'Feature',
-    properties: { ...properties, latitude: point.latitude, longitude: point.longitude, altitude: point.altitude },
-    geometry: { type: 'Point', coordinates: [point.longitude, point.latitude] },
-  };
+  return { type: 'Feature', properties: { ...properties, latitude: point.latitude, longitude: point.longitude, altitude: point.altitude }, geometry: { type: 'Point', coordinates: [point.longitude, point.latitude] } };
 }
-
 function lineFeature(points: GeoPoint[], properties: Record<string, unknown>): GeoJSON.Feature<GeoJSON.LineString> {
   return { type: 'Feature', properties, geometry: { type: 'LineString', coordinates: points.map((point) => [point.longitude, point.latitude]) } };
 }
-
 function polygonFeature(points: GeoPoint[], properties: Record<string, unknown>): GeoJSON.Feature<GeoJSON.Polygon> {
   const closed = closeRing(points);
   return { type: 'Feature', properties, geometry: { type: 'Polygon', coordinates: [closed.map((point) => [point.longitude, point.latitude])] } };
 }
-
 function circleFeature(centre: GeoPoint, radiusMeters: number, properties: Record<string, unknown>): GeoJSON.Feature<GeoJSON.Polygon> {
   const points = Array.from({ length: 65 }, (_, index) => destinationPoint(centre, index / 64 * 360, radiusMeters));
   return polygonFeature(points, { ...properties, radiusMeters, latitude: centre.latitude, longitude: centre.longitude });
 }
-
 function closeRing(points: GeoPoint[]): GeoPoint[] {
   if (points.length === 0) return points;
   const first = points[0];
   const last = points.at(-1)!;
   return first.latitude === last.latitude && first.longitude === last.longitude ? points : [...points, first];
 }
-
 function destinationPoint(start: GeoPoint, bearingDegrees: number, distanceMeters: number): GeoPoint {
   const earthRadius = 6_371_008.8;
   const angularDistance = distanceMeters / earthRadius;
@@ -486,25 +370,16 @@ function destinationPoint(start: GeoPoint, bearingDegrees: number, distanceMeter
   const destinationLongitude = longitude + Math.atan2(Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latitude), Math.cos(angularDistance) - Math.sin(latitude) * Math.sin(destinationLatitude));
   return { latitude: destinationLatitude * 180 / Math.PI, longitude: destinationLongitude * 180 / Math.PI, altitude: start.altitude };
 }
-
 function distanceMeters(left: GeoPoint, right: GeoPoint): number {
   const earthRadius = 6_371_008.8;
   const latitudeDelta = (right.latitude - left.latitude) * Math.PI / 180;
   const longitudeDelta = (right.longitude - left.longitude) * Math.PI / 180;
   const leftLatitude = left.latitude * Math.PI / 180;
   const rightLatitude = right.latitude * Math.PI / 180;
-  const haversine = Math.sin(latitudeDelta / 2) ** 2
-    + Math.cos(leftLatitude) * Math.cos(rightLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+  const haversine = Math.sin(latitudeDelta / 2) ** 2 + Math.cos(leftLatitude) * Math.cos(rightLatitude) * Math.sin(longitudeDelta / 2) ** 2;
   return earthRadius * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
-
-function showPropertiesPopup(
-  map: MapLibreMap,
-  lngLat: maplibregl.LngLat,
-  properties: Record<string, unknown>,
-  popupRef: MutableRefObject<maplibregl.Popup | null>,
-  fallbackTitle: string,
-): void {
+function showPropertiesPopup(map: MapLibreMap, lngLat: maplibregl.LngLat, properties: Record<string, unknown>, popupRef: MutableRefObject<maplibregl.Popup | null>, fallbackTitle: string): void {
   popupRef.current?.remove();
   const root = document.createElement('div');
   const title = document.createElement('strong');
@@ -520,7 +395,6 @@ function showPropertiesPopup(
   root.appendChild(table);
   popupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '360px' }).setLngLat(lngLat).setDOMContent(root).addTo(map);
 }
-
 function emptyFeatureCollection(): GeoJSON.FeatureCollection {
   return { type: 'FeatureCollection', features: [] };
 }
