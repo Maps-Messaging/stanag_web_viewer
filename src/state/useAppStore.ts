@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   BrokerConfiguration,
+  Detection,
   Drone,
   DroneTask,
   DroneTelemetryUpdate,
@@ -14,21 +15,26 @@ import { createUuid } from '../services/uuid';
 
 interface AppState {
   drones: Record<string, Drone>;
+  detections: Record<string, Detection>;
   tasks: Record<string, DroneTask>;
   latestTaskIdByDrone: Record<string, string>;
   events: EventLogEntry[];
   selectedDroneId?: string;
+  selectedDetectionId?: string;
   taskType?: TaskType;
   draftPoints: GeoPoint[];
   connected: boolean;
   connectionMessage: string;
   configuration: BrokerConfiguration;
   upsertDrone: (drone: Drone) => void;
+  upsertDetection: (detection: Detection) => void;
+  removeDetection: (detectionId: string) => void;
   updateDroneTelemetry: (droneId: string, telemetry: DroneTelemetryUpdate) => void;
   updateMavlinkStreamStatus: (systemId: number, status: MavlinkStreamStatus) => void;
   upsertTask: (task: DroneTask) => void;
   addEvent: (entry: Omit<EventLogEntry, 'id' | 'timestamp'>) => void;
   selectDrone: (droneId?: string) => void;
+  selectDetection: (detectionId?: string) => void;
   selectTaskType: (taskType?: TaskType) => void;
   addDraftPoint: (point: GeoPoint) => void;
   clearDraftPoints: () => void;
@@ -68,6 +74,7 @@ const MAX_TASK_HISTORY_PER_DRONE = 100;
 
 export const useAppStore = create<AppState>((set) => ({
   drones: {},
+  detections: {},
   tasks: {},
   latestTaskIdByDrone: {},
   events: [],
@@ -91,6 +98,27 @@ export const useAppStore = create<AppState>((set) => ({
             activeTaskId: existing?.activeTaskId,
           },
         },
+      };
+    }),
+
+  upsertDetection: (detection) =>
+    set((state) => {
+      const now = Date.now();
+      const detections = Object.fromEntries(
+        Object.entries(state.detections).filter(([, candidate]) => candidate.validUntil === undefined || candidate.validUntil >= now),
+      );
+      detections[detection.id] = { ...detections[detection.id], ...detection };
+      return { detections };
+    }),
+
+  removeDetection: (detectionId) =>
+    set((state) => {
+      if (!state.detections[detectionId]) return state;
+      const detections = { ...state.detections };
+      delete detections[detectionId];
+      return {
+        detections,
+        selectedDetectionId: state.selectedDetectionId === detectionId ? undefined : state.selectedDetectionId,
       };
     }),
 
@@ -208,8 +236,12 @@ export const useAppStore = create<AppState>((set) => ({
   selectDrone: (selectedDroneId) =>
     set({
       selectedDroneId,
+      selectedDetectionId: undefined,
       draftPoints: [],
     }),
+
+  selectDetection: (selectedDetectionId) =>
+    set({ selectedDetectionId, selectedDroneId: undefined, draftPoints: [] }),
 
   selectTaskType: (taskType) =>
     set({
