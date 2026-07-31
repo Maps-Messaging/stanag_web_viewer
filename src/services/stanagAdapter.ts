@@ -11,7 +11,6 @@ import type {
 } from '../models/types';
 import { createUuid } from './uuid';
 
-const DEFAULT_POINT_VOLUME_RADIUS_METERS = 25;
 const WGS_ALTITUDE_TYPE = 'AltitudeTypeEnum_WGS';
 
 export interface ParsedTaskStatus {
@@ -324,10 +323,7 @@ function buildLabeledVolume(geometry: TaskGeometry, timestamp: string): unknown 
 function buildRegionGeometry(geometry: TaskGeometry): unknown {
   switch (geometry.type) {
     case 'POINT':
-      return {
-        $discriminator: 'RegionTypeEnum_CIRCLE',
-        circle: { centre: buildGeometryPoint(geometry.point), radius: DEFAULT_POINT_VOLUME_RADIUS_METERS },
-      };
+      throw new Error('Volume tasks do not support POINT geometry; use CIRCLE');
     case 'CIRCLE':
       return {
         $discriminator: 'RegionTypeEnum_CIRCLE',
