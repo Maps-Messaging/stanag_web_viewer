@@ -1,4 +1,3 @@
-import FlightIcon from '@mui/icons-material/Flight';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import {
   Box,
@@ -73,33 +72,42 @@ const DroneListItem = memo(function DroneListItem({
   onShowDetails,
   onDetect,
 }: DroneListItemProps) {
-  const drone = useAppStore((state) => state.drones[droneId]);
-  const activeTask = useAppStore((state) => {
-    const taskId = state.drones[droneId]?.activeTaskId;
-    return taskId ? state.tasks[taskId] : undefined;
-  });
-  const selected = useAppStore((state) => state.selectedDroneId === droneId);
-  const connected = useAppStore((state) => state.connected);
+  const row = useAppStore(useShallow((state) => {
+    const drone = state.drones[droneId];
+    const activeTask = drone?.activeTaskId ? state.tasks[drone.activeTaskId] : undefined;
+
+    return drone ? {
+      id: drone.id,
+      name: drone.name,
+      symbolSet: drone.symbolSet,
+      hasPosition: drone.position !== undefined,
+      systemId: drone.twin?.systemId,
+      streamStatus: drone.mavlinkStreamStatus?.status,
+      hasStreamStatus: drone.mavlinkStreamStatus !== undefined,
+      activeTaskLabel: activeTask ? `TASK ${activeTask.type} · ${activeTask.geometry.type}` : undefined,
+      selected: state.selectedDroneId === droneId,
+      connected: state.connected,
+    } : undefined;
+  }));
   const selectDrone = useAppStore((state) => state.selectDrone);
   const addEvent = useAppStore((state) => state.addEvent);
   const [detecting, setDetecting] = useState(false);
 
-  if (!drone) return null;
+  if (!row) return null;
 
-  const systemId = drone.twin?.systemId;
-  const detectDisabled = detecting || !connected || systemId === undefined;
-  const detectTooltip = systemId === undefined
+  const detectDisabled = detecting || !row.connected || row.systemId === undefined;
+  const detectTooltip = row.systemId === undefined
     ? 'MAVLink system ID unavailable'
-    : !connected
+    : !row.connected
       ? 'Broker is disconnected'
       : 'Publish the detect MAVLink event';
 
   async function detect(): Promise<void> {
     setDetecting(true);
     try {
-      await onDetect(drone.id);
+      await onDetect(row.id);
     } catch (error) {
-      addEvent({ level: 'ERROR', message: `Detect failed for ${drone.name}: ${String(error)}` });
+      addEvent({ level: 'ERROR', message: `Detect failed for ${row.name}: ${String(error)}` });
     } finally {
       setDetecting(false);
     }
@@ -107,29 +115,25 @@ const DroneListItem = memo(function DroneListItem({
 
   return (
     <ListItemButton
-      selected={selected}
-      onClick={() => selectDrone(drone.id)}
+      selected={row.selected}
+      onClick={() => selectDrone(row.id)}
       sx={{ alignItems: 'center', gap: 1.25, py: 1.25 }}
     >
-      <AttitudeIndicator
-        rollDegrees={drone.roll}
-        pitchDegrees={drone.pitch}
-        altitudeMeters={drone.position?.altitude}
-      />
+      <DroneLiveTelemetry droneId={droneId} />
 
       <Box sx={{ minWidth: 0, flex: 1 }}>
         <Stack direction="row" spacing={0.5} alignItems="center">
           <Typography variant="body2" noWrap sx={{ minWidth: 0, flex: 1 }}>
-            {drone.name}
+            {row.name}
           </Typography>
 
           <Tooltip title="Drone details">
             <IconButton
               size="small"
-              aria-label={`Show details for ${drone.name}`}
+              aria-label={`Show details for ${row.name}`}
               onClick={(event) => {
                 event.stopPropagation();
-                onShowDetails(drone.id);
+                onShowDetails(row.id);
               }}
             >
               <InfoOutlinedIcon fontSize="small" />
@@ -137,31 +141,15 @@ const DroneListItem = memo(function DroneListItem({
           </Tooltip>
         </Stack>
 
-        <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.4 }}>
-          <FlightIcon
-            fontSize="small"
-            sx={{ transform: `rotate(${drone.heading}deg)`, color: 'text.secondary' }}
-          />
-          <Typography variant="caption" color="text.secondary">
-            {formatHeading(drone.heading)}
-          </Typography>
-        </Stack>
-
         <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" sx={{ mt: 0.75 }}>
-          {activeTask && (
-            <Chip
-              size="small"
-              color="primary"
-              label={`TASK ${activeTask.type} · ${activeTask.geometry.type}`}
-            />
-          )}
-          {drone.symbolSet && <Chip size="small" label={shortEnum(drone.symbolSet)} />}
-          <Chip size="small" label={drone.position ? 'LIVE' : 'KNOWN'} color={drone.position ? 'success' : 'default'} />
+          {row.activeTaskLabel && <Chip size="small" color="primary" label={row.activeTaskLabel} />}
+          {row.symbolSet && <Chip size="small" label={shortEnum(row.symbolSet)} />}
+          <Chip size="small" label={row.hasPosition ? 'LIVE' : 'KNOWN'} color={row.hasPosition ? 'success' : 'default'} />
           <Chip
             size="small"
-            label={streamStatusLabel(drone.mavlinkStreamStatus?.status)}
-            color={streamStatusColor(drone.mavlinkStreamStatus?.status)}
-            variant={drone.mavlinkStreamStatus ? 'filled' : 'outlined'}
+            label={streamStatusLabel(row.streamStatus)}
+            color={streamStatusColor(row.streamStatus)}
+            variant={row.hasStreamStatus ? 'filled' : 'outlined'}
           />
         </Stack>
 
@@ -183,6 +171,32 @@ const DroneListItem = memo(function DroneListItem({
         </Tooltip>
       </Box>
     </ListItemButton>
+  );
+});
+
+const DroneLiveTelemetry = memo(function DroneLiveTelemetry({ droneId }: { droneId: string }) {
+  const telemetry = useAppStore(useShallow((state) => {
+    const drone = state.drones[droneId];
+    return {
+      heading: drone?.heading ?? 0,
+      roll: drone?.roll,
+      pitch: drone?.pitch,
+      altitude: drone?.position?.altitude,
+    };
+  }));
+
+  return (
+    <div className="drone-live-telemetry">
+      <AttitudeIndicator
+        rollDegrees={telemetry.roll}
+        pitchDegrees={telemetry.pitch}
+        altitudeMeters={telemetry.altitude}
+      />
+      <div className="drone-heading">
+        <span className="drone-heading__arrow" style={{ transform: `rotate(${telemetry.heading}deg)` }}>▲</span>
+        <span>{formatHeading(telemetry.heading)}</span>
+      </div>
+    </div>
   );
 });
 

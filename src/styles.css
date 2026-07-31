@@ -47,6 +47,175 @@ html, body, #root {
   height: 40px;
 }
 
+.drone-live-telemetry {
+  display: flex;
+  flex: 0 0 58px;
+  flex-direction: column;
+  align-items: center;
+  min-width: 58px;
+}
+
+.attitude-indicator {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+}
+
+.attitude-indicator__dial {
+  position: relative;
+  overflow: hidden;
+  border: 2px solid #bdbdbd;
+  border-radius: 50%;
+  background: #212121;
+  box-shadow: inset 0 0 8px rgb(0 0 0 / 75%);
+}
+
+.attitude-indicator__horizon {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.attitude-indicator__sky,
+.attitude-indicator__ground,
+.attitude-indicator__horizon-line {
+  position: absolute;
+  right: 0;
+  left: 0;
+}
+
+.attitude-indicator__sky {
+  top: 0;
+  bottom: 50%;
+  background: #1976d2;
+}
+
+.attitude-indicator__ground {
+  top: 50%;
+  bottom: 0;
+  background: #7b4f2c;
+}
+
+.attitude-indicator__horizon-line {
+  top: 50%;
+  height: 2px;
+  background: #fff;
+  transform: translateY(-1px);
+}
+
+.attitude-indicator__aircraft {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  height: 2px;
+  background: #ffca28;
+  box-shadow: 0 0 2px rgb(0 0 0 / 80%);
+  transform: translate(-50%, -50%);
+}
+
+.attitude-indicator__centre {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #ffca28;
+  transform: translate(-50%, -50%);
+}
+
+.attitude-indicator__roll-marker {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-top: 7px solid #ffca28;
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+  transform: translateX(-50%);
+}
+
+.attitude-indicator__altitude {
+  margin-top: 4px;
+  color: rgb(255 255 255 / 70%);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.drone-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 5px;
+  color: rgb(255 255 255 / 70%);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.drone-heading__arrow {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.event-log-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.event-log-entry {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.event-log-entry__time {
+  color: rgb(255 255 255 / 70%);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-log-entry__level {
+  min-width: 44px;
+  padding: 1px 6px;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 10px;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.event-log-entry__level--warn {
+  border-color: #ed6c02;
+  color: #ffb74d;
+}
+
+.event-log-entry__level--error {
+  border-color: #d32f2f;
+  color: #ef5350;
+}
+
+.event-log-entry__message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+
 @media (max-width: 1100px) {
   .workspace {
     grid-template-columns: 220px minmax(0, 1fr);
@@ -55,6 +224,38 @@ html, body, #root {
       "drones map"
       "task task"
       "events events";
+  }
+}
+
+@media (max-width: 700px) {
+  html, body, #root {
+    min-height: 100%;
+    height: auto;
+    overflow: auto;
+  }
+
+  .app-shell {
+    min-height: 100vh;
+    height: auto;
+    grid-template-rows: auto auto;
+  }
+
+  .workspace {
+    min-height: auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 240px 50vh auto 180px;
+    grid-template-areas:
+      "drones"
+      "map"
+      "task"
+      "events";
+  }
+
+  .drone-list,
+  .map-panel,
+  .task-panel,
+  .event-log {
+    min-width: 0;
   }
 }
 

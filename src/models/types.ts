@@ -63,7 +63,16 @@ export interface DroneTelemetryUpdate {
   climbRate?: number; lastSeen?: number; twin?: TwinState; mavlinkStreamStatus?: MavlinkStreamStatus;
 }
 
-export type TaskType = 'REPOSITION' | 'LOITER' | 'NAVIGATE' | 'PATROL';
+export type TaskType =
+  | 'REPOSITION'
+  | 'NAVIGATE'
+  | 'PATROL'
+  | 'LOITER'
+  | 'STANDBY'
+  | 'DETECT'
+  | 'SURVEY'
+  | 'SCREEN';
+
 export type TaskGeometryType = 'POINT' | 'CIRCLE' | 'LINE' | 'RECTANGLE' | 'POLYGON' | 'CORRIDOR';
 export type TaskGeometry =
   | { type: 'POINT'; point: GeoPoint }

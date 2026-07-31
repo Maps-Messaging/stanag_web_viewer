@@ -1,20 +1,35 @@
-import { Box, Chip, Paper, Stack, Typography } from '@mui/material';
+import { Paper, Typography } from '@mui/material';
+import { memo } from 'react';
+import type { EventLogEntry } from '../models/types';
 import { useAppStore } from '../state/useAppStore';
 
 export function EventLog() {
   const events = useAppStore((state) => state.events);
+
   return (
     <Paper square sx={{ height: '100%', overflow: 'auto', p: 1.5 }}>
       <Typography variant="overline">Events</Typography>
-      <Stack spacing={0.5}>
+      <div className="event-log-entries">
         {events.slice(0, 30).map((event) => (
-          <Box key={event.id} sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
-            <Typography variant="caption" color="text.secondary">{new Date(event.timestamp).toLocaleTimeString()}</Typography>
-            <Chip size="small" label={event.level} color={event.level === 'ERROR' ? 'error' : event.level === 'WARN' ? 'warning' : 'default'} />
-            <Typography variant="body2">{event.message}</Typography>
-          </Box>
+          <EventLogRow key={event.id} event={event} />
         ))}
-      </Stack>
+      </div>
     </Paper>
   );
 }
+
+const EventLogRow = memo(function EventLogRow({ event }: { event: EventLogEntry }) {
+  const eventDate = new Date(event.timestamp);
+
+  return (
+    <div className="event-log-entry">
+      <time className="event-log-entry__time" dateTime={eventDate.toISOString()}>
+        {eventDate.toLocaleTimeString()}
+      </time>
+      <span className={`event-log-entry__level event-log-entry__level--${event.level.toLowerCase()}`}>
+        {event.level}
+      </span>
+      <span className="event-log-entry__message">{event.message}</span>
+    </div>
+  );
+});

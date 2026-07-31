@@ -11,6 +11,8 @@ import type {
 } from '../models/types';
 import { createUuid } from './uuid';
 
+const DEFAULT_POINT_VOLUME_RADIUS_METERS = 25;
+
 export interface ParsedTaskStatus {
   messageType: 'MessageTypeEnum_TASK_FEEDBACK' | 'MessageTypeEnum_TASK_RESULT';
   taskId: string;
@@ -211,86 +213,113 @@ function buildAuthority(guid: string): unknown {
 function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
   const discriminator = `TaskTypeEnum_${task.type}`;
 
-  if (task.type === 'PATROL') {
-    return {
-      $discriminator: discriminator,
-      patrol: {
-        geometry: buildPatrolGeometry(task.geometry),
-        pattern: 'LADDER',
-      },
-    };
-  }
-
-  if (task.type === 'LOITER' && task.geometry.type === 'POINT') {
-    return {
-      $discriminator: discriminator,
-      loiter: {
-        pose: {
-          $discriminator: 'ValueTypeEnum_POSE',
-          pose: {
-            position: buildPositionUnion(task.geometry.point),
+  switch (task.type) {
+    case 'REPOSITION':
+      if (task.geometry.type !== 'POINT') throw new Error(`REPOSITION does not support ${task.geometry.type} geometry`);
+      return {
+        $discriminator: discriminator,
+        reposition: {
+          location: {
+            identifier: createUuid(),
+            timestamp,
+            location: buildLocationGeometry(task.geometry),
           },
         },
-      },
-    };
-  }
+      };
 
-  if (task.type === 'LOITER' && task.geometry.type === 'CIRCLE') {
-    return {
-      $discriminator: discriminator,
-      loiter: {
-        volume: {
-          identifier: createUuid(),
-          timestamp,
-          volume: {
-            region: {
-              $discriminator: 'RegionTypeEnum_CIRCLE',
-              circle: { centre: buildGeometryPoint(task.geometry.centre), radius: task.geometry.radiusMeters },
-            },
-          },
-        },
-      },
-    };
-  }
-
-  if (task.type === 'NAVIGATE') {
-    const points = task.geometry.type === 'POINT'
-      ? [task.geometry.point]
-      : task.geometry.type === 'LINE'
-        ? task.geometry.points
-        : undefined;
-
-    if (!points) {
-      throw new Error(`NAVIGATE does not support ${task.geometry.type} geometry`);
+    case 'NAVIGATE': {
+      const points = task.geometry.type === 'POINT'
+        ? [task.geometry.point]
+        : task.geometry.type === 'LINE'
+          ? task.geometry.points
+          : undefined;
+      if (!points) throw new Error(`NAVIGATE does not support ${task.geometry.type} geometry`);
+      return { $discriminator: discriminator, navigate: { route: { points: points.map(buildGeometryPoint) } } };
     }
 
-    return {
-      $discriminator: discriminator,
-      navigate: {
-        route: {
-          points: points.map(buildGeometryPoint),
-        },
-      },
-    };
-  }
+    case 'PATROL':
+      return {
+        $discriminator: discriminator,
+        patrol: { geometry: buildPatrolGeometry(task.geometry), pattern: 'LADDER' },
+      };
 
-  if (task.type === 'REPOSITION' && task.geometry.type === 'POINT') {
-    return {
-      $discriminator: discriminator,
-      reposition: {
-        location: {
-          identifier: createUuid(),
-          timestamp,
-          location: {
-            $discriminator: 'GeometryTypeEnum_POINT',
-            point: buildGeometryPoint(task.geometry.point),
+    case 'LOITER':
+      if (task.geometry.type === 'POINT') {
+        return {
+          $discriminator: discriminator,
+          loiter: {
+            pose: {
+              $discriminator: 'ValueTypeEnum_POSE',
+              pose: { position: buildPositionUnion(task.geometry.point) },
+            },
           },
-        },
-      },
-    };
-  }
+        };
+      }
+      return { $discriminator: discriminator, loiter: { volume: buildLabeledVolume(task.geometry, timestamp) } };
 
-  throw new Error(`${task.type} does not support ${task.geometry.type} geometry`);
+    case 'STANDBY':
+      return { $discriminator: discriminator, standby: buildVolumeTask(task.geometry, timestamp) };
+
+    case 'DETECT':
+      return { $discriminator: discriminator, detect: buildSensingVolumeTask(task.geometry, timestamp) };
+
+    case 'SURVEY':
+      return { $discriminator: discriminator, survey: buildSensingVolumeTask(task.geometry, timestamp) };
+
+    case 'SCREEN':
+      return { $discriminator: discriminator, screen: buildVolumeTask(task.geometry, timestamp) };
+  }
+}
+
+function buildVolumeTask(geometry: TaskGeometry, timestamp: string): unknown {
+  return { volume: buildLabeledVolume(geometry, timestamp) };
+}
+
+function buildSensingVolumeTask(geometry: TaskGeometry, timestamp: string): unknown {
+  return { sensor_type: 'SensingModeEnum_PASSIVE', volume: buildLabeledVolume(geometry, timestamp) };
+}
+
+function buildLabeledVolume(geometry: TaskGeometry, timestamp: string): unknown {
+  return {
+    identifier: createUuid(),
+    timestamp,
+    volume: { region: buildRegionGeometry(geometry) },
+  };
+}
+
+function buildRegionGeometry(geometry: TaskGeometry): unknown {
+  switch (geometry.type) {
+    case 'POINT':
+      return {
+        $discriminator: 'RegionTypeEnum_CIRCLE',
+        circle: { centre: buildGeometryPoint(geometry.point), radius: DEFAULT_POINT_VOLUME_RADIUS_METERS },
+      };
+    case 'CIRCLE':
+      return {
+        $discriminator: 'RegionTypeEnum_CIRCLE',
+        circle: { centre: buildGeometryPoint(geometry.centre), radius: geometry.radiusMeters },
+      };
+    case 'RECTANGLE':
+      return {
+        $discriminator: 'RegionTypeEnum_POLYGON_AREA',
+        polygon_area: { points: closeRing(geometry.points).map(buildGeometryPoint) },
+      };
+    case 'POLYGON':
+      return {
+        $discriminator: 'RegionTypeEnum_POLYGON_AREA',
+        polygon_area: { points: closeRing(geometry.points).map(buildGeometryPoint) },
+      };
+    case 'CORRIDOR':
+      return {
+        $discriminator: 'RegionTypeEnum_CORRIDOR_AREA',
+        corridor_area: {
+          center_line: geometry.centreLine.map(buildGeometryPoint),
+          width: geometry.widthMeters,
+        },
+      };
+    case 'LINE':
+      throw new Error('Volume tasks do not support LINE geometry; use CORRIDOR');
+  }
 }
 
 function buildPositionUnion(point: GeoPoint): unknown {
@@ -323,21 +352,12 @@ function buildPatrolGeometry(geometry: TaskGeometry): unknown {
     case 'CIRCLE':
       return {
         $discriminator: 'GeometryTypeEnum_CIRCLE',
-        circle: {
-          centre: buildGeometryPoint(geometry.centre),
-          radius: buildDistance(geometry.radiusMeters),
-        },
+        circle: { centre: buildGeometryPoint(geometry.centre), radius: buildDistance(geometry.radiusMeters) },
       };
     case 'RECTANGLE':
-      return {
-        $discriminator: 'GeometryTypeEnum_RECTANGLE',
-        rectangle: { points: geometry.points.map(buildGeometryPoint) },
-      };
+      return { $discriminator: 'GeometryTypeEnum_RECTANGLE', rectangle: { points: geometry.points.map(buildGeometryPoint) } };
     case 'POLYGON':
-      return {
-        $discriminator: 'GeometryTypeEnum_POLYGON_AREA',
-        polygon: { points: closeRing(geometry.points).map(buildGeometryPoint) },
-      };
+      return { $discriminator: 'GeometryTypeEnum_POLYGON_AREA', polygon: { points: closeRing(geometry.points).map(buildGeometryPoint) } };
     case 'CORRIDOR':
       return {
         $discriminator: 'GeometryTypeEnum_CORRIDOR_AREA',
@@ -352,23 +372,14 @@ function buildPatrolGeometry(geometry: TaskGeometry): unknown {
 }
 
 function buildGeometryPoint(point: GeoPoint): unknown {
-  return {
-    latitude: point.latitude,
-    longitude: point.longitude,
-    altitude: point.altitude ?? 0,
-  };
+  return { latitude: point.latitude, longitude: point.longitude, altitude: point.altitude ?? 0 };
 }
 
 function buildPositionValue(point: GeoPoint): unknown {
   return {
     latitude: point.latitude,
     longitude: point.longitude,
-    altitude: [
-      {
-        type: point.altitudeType ?? 'AltitudeTypeEnum_WGS',
-        value: point.altitude ?? 0,
-      },
-    ],
+    altitude: [{ type: point.altitudeType ?? 'AltitudeTypeEnum_WGS', value: point.altitude ?? 0 }],
   };
 }
 
@@ -441,29 +452,33 @@ export function parseTaskAdmin(payload: unknown): ParsedTaskAdmin {
 
 function parseTaskType(value: string): TaskType {
   const type = value.replace('TaskTypeEnum_', '');
-  if (type === 'REPOSITION' || type === 'LOITER' || type === 'NAVIGATE' || type === 'PATROL') return type;
-  throw new Error(`Unsupported task type: ${value}`);
+  switch (type) {
+    case 'REPOSITION':
+    case 'NAVIGATE':
+    case 'PATROL':
+    case 'LOITER':
+    case 'STANDBY':
+    case 'DETECT':
+    case 'SURVEY':
+    case 'SCREEN':
+      return type;
+    default:
+      throw new Error(`Unsupported task type: ${value}`);
+  }
 }
 
 function parseTaskGeometry(description: Record<string, unknown>): TaskGeometry {
   const geometry = findDiscriminator(description, (value) => value.startsWith('GeometryTypeEnum_'));
   if (geometry) return parseGeometry(geometry);
 
-  const circleRegion = findDiscriminator(description, (value) => value === 'RegionTypeEnum_CIRCLE');
-  if (circleRegion) {
-    const circle = asObject(circleRegion.circle, 'circle');
-    return { type: 'CIRCLE', centre: parsePoint(circle.centre), radiusMeters: parseDistance(circle.radius, 'circle.radius') };
-  }
+  const region = findDiscriminator(description, (value) => value.startsWith('RegionTypeEnum_'));
+  if (region) return parseRegionGeometry(region);
 
   const position = findDiscriminator(description, (value) => value === 'PositionTypeEnum_LATITUDE_LONGITUDE_ALTITUDE');
   if (position) return { type: 'POINT', point: parsePoint(position.latitude_longitude_altitude) };
 
   const route = findRoutePoints(description);
-  if (route) {
-    return route.length === 1
-      ? { type: 'POINT', point: route[0] }
-      : { type: 'LINE', points: route };
-  }
+  if (route) return route.length === 1 ? { type: 'POINT', point: route[0] } : { type: 'LINE', points: route };
 
   throw new Error('Task description does not contain a supported geometry');
 }
@@ -473,6 +488,33 @@ function findRoutePoints(description: Record<string, unknown>): GeoPoint[] | und
   const route = optionalObject(navigate?.route);
   if (!route || !Array.isArray(route.points)) return undefined;
   return parsePoints(route.points, 1, 'navigate.route.points');
+}
+
+function parseRegionGeometry(value: Record<string, unknown>): TaskGeometry {
+  switch (value.$discriminator) {
+    case 'RegionTypeEnum_CIRCLE': {
+      const circle = asObject(value.circle, 'circle');
+      return { type: 'CIRCLE', centre: parsePoint(circle.centre), radiusMeters: parseDistance(circle.radius, 'circle.radius') };
+    }
+    case 'RegionTypeEnum_POLYGON_AREA': {
+      const polygon = asObject(value.polygon_area, 'polygon_area');
+      return {
+        type: 'POLYGON',
+        points: removeClosingPoint(parsePoints(polygon.points ?? polygon.positions, 3, 'polygon_area.points')),
+      };
+    }
+    case 'RegionTypeEnum_CORRIDOR_AREA': {
+      const corridor = asObject(value.corridor_area, 'corridor_area');
+      const centreLine = optionalObject(corridor.center_line)?.points ?? corridor.center_line;
+      return {
+        type: 'CORRIDOR',
+        centreLine: parsePoints(centreLine, 2, 'corridor_area.center_line'),
+        widthMeters: parseDistance(corridor.width, 'corridor_area.width'),
+      };
+    }
+    default:
+      throw new Error(`Unsupported region discriminator: ${String(value.$discriminator)}`);
+  }
 }
 
 function parseGeometry(value: Record<string, unknown>): TaskGeometry {
@@ -485,7 +527,10 @@ function parseGeometry(value: Record<string, unknown>): TaskGeometry {
     case 'GeometryTypeEnum_LINE': return { type: 'LINE', points: parsePoints(asObject(value.line, 'line').points, 2, 'line.points') };
     case 'GeometryTypeEnum_RECTANGLE': return { type: 'RECTANGLE', points: removeClosingPoint(parsePoints(asObject(value.rectangle, 'rectangle').points, 4, 'rectangle.points')) };
     case 'GeometryTypeEnum_POLYGON':
-    case 'GeometryTypeEnum_POLYGON_AREA': return { type: 'POLYGON', points: removeClosingPoint(parsePoints(asObject(value.polygon, 'polygon').points, 3, 'polygon.points')) };
+    case 'GeometryTypeEnum_POLYGON_AREA': {
+      const polygon = optionalObject(value.polygon) ?? asObject(value.polygon_area, 'polygon_area');
+      return { type: 'POLYGON', points: removeClosingPoint(parsePoints(polygon.points ?? polygon.positions, 3, 'polygon.points')) };
+    }
     case 'GeometryTypeEnum_CORRIDOR':
     case 'GeometryTypeEnum_CORRIDOR_AREA': {
       const corridor = asObject(value.corridor_area, 'corridor_area');

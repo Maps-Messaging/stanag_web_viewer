@@ -1,8 +1,9 @@
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import SendIcon from '@mui/icons-material/Send';
-import { Alert, Box, Button, ButtonGroup, Divider, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Divider, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { DroneTask, GeoPoint, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
 import type { MessageTransport } from '../messaging/transport';
 import { createUuid } from '../services/uuid';
@@ -10,23 +11,42 @@ import { useAppStore } from '../state/useAppStore';
 
 interface Props { transport?: MessageTransport; }
 
-const TASK_TYPES: TaskType[] = ['REPOSITION', 'LOITER', 'NAVIGATE', 'PATROL'];
+const TASK_TYPES: TaskType[] = [
+  'REPOSITION',
+  'NAVIGATE',
+  'PATROL',
+  'LOITER',
+  'STANDBY',
+  'DETECT',
+  'SURVEY',
+  'SCREEN',
+];
+
+const VOLUME_TASK_GEOMETRIES: TaskGeometryType[] = ['POINT', 'CIRCLE', 'POLYGON', 'CORRIDOR'];
 
 const TASK_GEOMETRIES: Record<TaskType, TaskGeometryType[]> = {
   REPOSITION: ['POINT'],
-  NAVIGATE: ['POINT'],
-  LOITER: ['POINT', 'CIRCLE'],
+  NAVIGATE: ['POINT', 'LINE'],
   PATROL: ['CIRCLE', 'RECTANGLE', 'POLYGON', 'CORRIDOR'],
+  LOITER: ['POINT', 'CIRCLE'],
+  STANDBY: VOLUME_TASK_GEOMETRIES,
+  DETECT: VOLUME_TASK_GEOMETRIES,
+  SURVEY: VOLUME_TASK_GEOMETRIES,
+  SCREEN: VOLUME_TASK_GEOMETRIES,
 };
-
-const TASK_TYPES: TaskType[] = ['REPOSITION', 'LOITER'];
 
 export function TaskPanel({ transport }: Props) {
   const selectedDroneId = useAppStore((state) => state.selectedDroneId);
-  const selectedDrone = useAppStore((state) => selectedDroneId ? state.drones[selectedDroneId] : undefined);
+  const selectedDrone = useAppStore(useShallow((state) => {
+    const drone = selectedDroneId ? state.drones[selectedDroneId] : undefined;
+    return drone ? { id: drone.id, name: drone.name, capabilities: drone.capabilities } : undefined;
+  }));
   const taskType = useAppStore((state) => state.taskType);
   const draftPoints = useAppStore((state) => state.draftPoints);
-  const tasks = useAppStore((state) => state.tasks);
+  const latestTask = useAppStore((state) => {
+    const taskId = selectedDroneId ? state.latestTaskIdByDrone[selectedDroneId] : undefined;
+    return taskId ? state.tasks[taskId] : undefined;
+  });
   const selectTaskType = useAppStore((state) => state.selectTaskType);
   const clearDraftPoints = useAppStore((state) => state.clearDraftPoints);
   const addEvent = useAppStore((state) => state.addEvent);
@@ -34,10 +54,6 @@ export function TaskPanel({ transport }: Props) {
   const [altitude, setAltitude] = useState(100);
   const [radius, setRadius] = useState(50);
   const [corridorWidth, setCorridorWidth] = useState(100);
-
-  const latestTask = useMemo(() => Object.values(tasks)
-    .filter((task) => task.droneId === selectedDroneId)
-    .sort((left, right) => right.updatedAt - left.updatedAt)[0], [tasks, selectedDroneId]);
 
   const supportedTaskTypes = useMemo(() => {
     if (!selectedDrone) return [];
@@ -55,7 +71,7 @@ export function TaskPanel({ transport }: Props) {
 
   const capability = selectedDrone?.capabilities.find((candidate) => normaliseTaskType(candidate.taskType) === taskType);
   const authorityGuid = capability?.authorities[0];
-  const taskGridColumns = getTaskGridColumnCount(TASK_TYPES.length);
+  const taskGridColumns = getTaskGridColumnCount(supportedTaskTypes.length);
   const allowedGeometries = taskType ? TASK_GEOMETRIES[taskType] : [];
   const effectiveGeometryType = taskType && allowedGeometries.includes(geometryType)
     ? geometryType
@@ -121,27 +137,28 @@ export function TaskPanel({ transport }: Props) {
 
       <Divider sx={{ my: 2 }} />
       <Typography variant="overline">Task</Typography>
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${taskGridColumns}, minmax(0, 1fr))`,
-          gap: 1,
-          mb: 2,
-        }}
-      >
-        {TASK_TYPES.map((type) => (
-          <Button
-            key={type}
-            fullWidth
-            variant={taskType === type ? 'contained' : 'outlined'}
-            disabled={Boolean(selectedDrone) && !supportedTaskTypes.includes(type)}
-            onClick={() => chooseTask(type)}
-            sx={{ minWidth: 0 }}
-          >
-            {type}
-          </Button>
-        ))}
-      </Box>
+      {supportedTaskTypes.length > 0 && (
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${taskGridColumns}, minmax(0, 1fr))`,
+            gap: 1,
+            mb: 2,
+          }}
+        >
+          {supportedTaskTypes.map((type) => (
+            <Button
+              key={type}
+              fullWidth
+              variant={taskType === type ? 'contained' : 'outlined'}
+              onClick={() => chooseTask(type)}
+              sx={{ minWidth: 0 }}
+            >
+              {type}
+            </Button>
+          ))}
+        </Box>
+      )}
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         {taskType && effectiveGeometryType ? geometryInstruction(effectiveGeometryType) : 'Choose an advertised task type.'}
       </Typography>
