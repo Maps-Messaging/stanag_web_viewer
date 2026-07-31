@@ -9,14 +9,12 @@ import { TaskPanel } from './components/TaskPanel';
 import { createTransport } from './messaging/transportFactory';
 import type { MessageTransport } from './messaging/transport';
 import type { BrokerConfiguration } from './models/types';
-import {
-  buildNamedValueFloatEvent,
-  namedValueFloatTopic,
-} from './services/mavlinkEvents';
+import { buildNamedValueFloatEvent, namedValueFloatTopic } from './services/mavlinkEvents';
 import { useAppStore } from './state/useAppStore';
 
 const DETECTION_NAME = 'DETECT';
 const DETECTION_DURATION_MILLIS = 5_000;
+const DETECTION_EXPIRY_CHECK_MILLIS = 1_000;
 
 const theme = createTheme({
   palette: {
@@ -53,6 +51,13 @@ export default function App() {
     return () => { void transportRef.current?.disconnect(); };
   }, []);
 
+  useEffect(() => {
+    const timer = globalThis.setInterval(() => {
+      useAppStore.getState().purgeExpiredDetections();
+    }, DETECTION_EXPIRY_CHECK_MILLIS);
+    return () => globalThis.clearInterval(timer);
+  }, []);
+
   async function applySettings(nextConfiguration: BrokerConfiguration): Promise<void> {
     updateConfiguration(nextConfiguration);
     setSettingsOpen(false);
@@ -63,54 +68,21 @@ export default function App() {
     const drone = useAppStore.getState().drones[droneId];
     const currentTransport = transportRef.current;
 
-    if (!drone) {
-      throw new Error(`Unknown drone ${droneId}`);
-    }
-
-    if (!currentTransport) {
-      throw new Error('Message transport is not connected');
-    }
+    if (!drone) throw new Error(`Unknown drone ${droneId}`);
+    if (!currentTransport) throw new Error('Message transport is not connected');
 
     const systemId = drone.twin?.systemId;
     const componentId = drone.twin?.componentId ?? 1;
-
-    if (systemId === undefined) {
-      throw new Error(`MAVLink system ID is unavailable for ${drone.name}`);
-    }
+    if (systemId === undefined) throw new Error(`MAVLink system ID is unavailable for ${drone.name}`);
 
     const destination = namedValueFloatTopic(systemId);
-
-    await currentTransport.publishEvent(
-      destination,
-      buildNamedValueFloatEvent(
-        systemId,
-        componentId,
-        DETECTION_NAME,
-        1,
-      ),
-    );
-
-    addEvent({
-      level: 'INFO',
-      message: `Detection asserted for ${drone.name}`,
-    });
+    await currentTransport.publishEvent(destination, buildNamedValueFloatEvent(systemId, componentId, DETECTION_NAME, 1));
+    addEvent({ level: 'INFO', message: `Detection asserted for ${drone.name}` });
 
     await delay(DETECTION_DURATION_MILLIS);
 
-    await currentTransport.publishEvent(
-      destination,
-      buildNamedValueFloatEvent(
-        systemId,
-        componentId,
-        DETECTION_NAME,
-        0,
-      ),
-    );
-
-    addEvent({
-      level: 'INFO',
-      message: `Detection cleared for ${drone.name}`,
-    });
+    await currentTransport.publishEvent(destination, buildNamedValueFloatEvent(systemId, componentId, DETECTION_NAME, 0));
+    addEvent({ level: 'INFO', message: `Detection cleared for ${drone.name}` });
   }
 
   return (
@@ -119,9 +91,7 @@ export default function App() {
       <div className="app-shell">
         <ConnectionBar onOpenSettings={() => setSettingsOpen(true)} />
         <main className="workspace">
-          <aside className="drone-list">
-            <DroneList onDetect={detectDrone} />
-          </aside>
+          <aside className="drone-list"><DroneList onDetect={detectDrone} /></aside>
           <section className="map-panel"><MapView /></section>
           <aside className="task-panel"><TaskPanel transport={transport} /></aside>
           <section className="event-log"><EventLog /></section>

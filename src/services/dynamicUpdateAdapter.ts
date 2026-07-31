@@ -1,8 +1,8 @@
 import type { Detection, GeoPoint } from '../models/types';
 
-const DETECTION_TTL_MILLISECONDS = 2 * 60 * 1000;
+export const DETECTION_TTL_MILLISECONDS = 2 * 60 * 1000;
 
-export function parseDynamicTrack(payload: unknown): Detection {
+export function parseDynamicTrack(payload: unknown, receivedAt = Date.now()): Detection {
   const envelope = asObject(payload, 'message');
   const header = asObject(envelope.header, 'header');
   const body = asObject(envelope.body, 'body');
@@ -26,8 +26,7 @@ export function parseDynamicTrack(payload: unknown): Detection {
   }
 
   const coordinates = asObject(position.latitude_longitude_altitude, 'track.pose.position.latitude_longitude_altitude');
-  const timestamp = parseTimestamp(track.timestamp) ?? parseTimestamp(header.time_sent) ?? Date.now();
-  const receivedAt = Date.now();
+  const timestamp = parseTimestamp(track.timestamp) ?? parseTimestamp(header.time_sent) ?? receivedAt;
 
   return {
     id: asString(track.identifier, 'track.identifier'),
@@ -49,7 +48,8 @@ export function parseDynamicTrack(payload: unknown): Detection {
     trackPhase: optionalString(track.track_phase),
     timestamp,
     initiatedAt: parseTimestamp(track.time_of_initiation),
-    validUntil: receivedAt + DETECTION_TTL_MILLISECONDS,
+    sourceValidUntil: parseTimestamp(track.time_of_validity),
+    expiresAt: receivedAt + DETECTION_TTL_MILLISECONDS,
     rtspUrl: findRtspUrl(track),
     raw: payload,
   };

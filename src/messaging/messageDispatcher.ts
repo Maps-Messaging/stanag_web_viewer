@@ -4,6 +4,18 @@ import { getStanagMessageType, parseNodeMessage, parseTaskAdmin, parseTaskStatus
 import { useAppStore } from '../state/useAppStore';
 
 export function dispatchStanagMessage(payload: unknown): void {
+  try {
+    dispatchValidatedStanagMessage(payload);
+  } catch (error) {
+    useAppStore.getState().addEvent({
+      level: 'ERROR',
+      message: `Invalid STANAG message: ${formatError(error)}`,
+      payload,
+    });
+  }
+}
+
+function dispatchValidatedStanagMessage(payload: unknown): void {
   const store = useAppStore.getState();
   const messageType = getStanagMessageType(payload);
 
@@ -12,121 +24,139 @@ export function dispatchStanagMessage(payload: unknown): void {
     store.upsertDrone(node.drone);
 
     if (messageType === 'MessageTypeEnum_NODE_DESCRIPTION') {
-      store.addEvent({
-        level: 'INFO',
-        message: `${node.messageType}: ${node.drone.name}`,
-        payload,
-      });
+      store.addEvent({ level: 'INFO', message: `${node.messageType}: ${node.drone.name}`, payload });
     }
-
     return;
   }
 
   if (messageType === 'MessageTypeEnum_DYNAMIC_UPDATE') {
-    try {
-      const detection = parseDynamicTrack(payload);
-      store.upsertDetection(detection);
-      store.addEvent({
-        level: 'INFO',
-        message: `DYNAMIC_UPDATE TRACK: ${detection.name} ${detection.id}`,
-        payload,
-      });
-    } catch (error) {
-      store.addEvent({
-        level: 'WARN',
-        message: `Unsupported DYNAMIC_UPDATE: ${error instanceof Error ? error.message : String(error)}`,
-        payload,
-      });
-    }
+    dispatchDynamicUpdate(payload);
     return;
   }
 
   if (messageType === 'MessageTypeEnum_TASK_ADMIN') {
-    const admin = parseTaskAdmin(payload);
-
-    if (admin.action === 'PUSH' && admin.task) {
-      store.upsertTask(withDisplayFields(admin.task));
-      store.addEvent({
-        level: 'INFO',
-        message: `TASK_ADMIN PUSH: ${admin.task.type} ${admin.taskId}`,
-        payload,
-      });
-      return;
-    }
-
-    const existing = store.tasks[admin.taskId];
-    if (!existing) {
-      store.addEvent({
-        level: 'WARN',
-        message: `TASK_ADMIN CANCEL received for unknown task ${admin.taskId}`,
-        payload,
-      });
-      return;
-    }
-
-    store.upsertTask({
-      ...existing,
-      state: 'CANCEL_REQUESTED',
-      updatedAt: Date.now(),
-    });
-    store.addEvent({
-      level: 'INFO',
-      message: `TASK_ADMIN CANCEL: ${admin.taskId}`,
-      payload,
-    });
+    dispatchTaskAdmin(payload);
     return;
   }
 
   if (messageType === 'MessageTypeEnum_TASK_FEEDBACK' || messageType === 'MessageTypeEnum_TASK_RESULT') {
-    const status = parseTaskStatus(payload);
-    const existing = store.tasks[status.taskId];
+    dispatchTaskStatus(payload);
+    return;
+  }
 
-    if (!existing) {
+  store.addEvent({ level: 'WARN', message: `Unsupported STANAG message type: ${messageType}`, payload });
+}
+
+function dispatchDynamicUpdate(payload: unknown): void {
+  const store = useAppStore.getState();
+  try {
+    const detection = parseDynamicTrack(payload);
+    const previous = store.detections[detection.id];
+    store.upsertDetection(detection);
+
+    if (!previous) {
       store.addEvent({
-        level: 'WARN',
-        message: `${status.messageType} received for unknown task ${status.taskId}`,
+        level: 'INFO',
+        message: `Detection acquired: ${detection.name} ${detection.id}`,
         payload,
       });
-      return;
+    } else if (!previous.rtspUrl && detection.rtspUrl) {
+      store.addEvent({
+        level: 'INFO',
+        message: `Detection video available: ${detection.name} ${detection.id}`,
+        payload,
+      });
     }
-
-    store.upsertTask({
-      ...existing,
-      state: status.state,
-      percentComplete: status.percentComplete ?? existing.percentComplete,
-      updatedAt: Date.now(),
-      message: status.message,
-    });
-
+  } catch (error) {
     store.addEvent({
-      level: status.state === 'FAILED' || status.state === 'REJECTED' ? 'ERROR' : 'INFO',
-      message: `${status.messageType}: ${status.taskId} ${status.state}${
-        status.percentComplete === undefined ? '' : ` ${status.percentComplete.toFixed(1)}%`
-      }${status.message ? `: ${status.message}` : ''}`,
+      level: 'WARN',
+      message: `Unsupported DYNAMIC_UPDATE: ${formatError(error)}`,
+      payload,
+    });
+  }
+}
+
+function dispatchTaskAdmin(payload: unknown): void {
+  const store = useAppStore.getState();
+  const admin = parseTaskAdmin(payload);
+
+  if (admin.action === 'PUSH' && admin.task) {
+    store.upsertTask(withDisplayFields(admin.task));
+    store.addEvent({
+      level: 'INFO',
+      message: `TASK_ADMIN PUSH: ${admin.task.type} ${admin.taskId}`,
       payload,
     });
     return;
   }
 
+  const existing = store.tasks[admin.taskId];
+  if (!existing) {
+    store.addEvent({ level: 'WARN', message: `TASK_ADMIN CANCEL received for unknown task ${admin.taskId}`, payload });
+    return;
+  }
+  if (existing.droneId !== admin.droneId) {
+    store.addEvent({
+      level: 'ERROR',
+      message: `TASK_ADMIN CANCEL drone mismatch for ${admin.taskId}: expected ${existing.droneId}, received ${admin.droneId}`,
+      payload,
+    });
+    return;
+  }
+
+  store.upsertTask({ ...existing, state: 'CANCEL_REQUESTED', updatedAt: Date.now() });
+  store.addEvent({ level: 'INFO', message: `TASK_ADMIN CANCEL: ${admin.taskId}`, payload });
+}
+
+function dispatchTaskStatus(payload: unknown): void {
+  const store = useAppStore.getState();
+  const status = parseTaskStatus(payload);
+  const existing = store.tasks[status.taskId];
+
+  if (!existing) {
+    store.addEvent({ level: 'WARN', message: `${status.messageType} received for unknown task ${status.taskId}`, payload });
+    return;
+  }
+  if (existing.droneId !== status.droneId) {
+    store.addEvent({
+      level: 'ERROR',
+      message: `${status.messageType} drone mismatch for ${status.taskId}: expected ${existing.droneId}, received ${status.droneId}`,
+      payload,
+    });
+    return;
+  }
+
+  store.upsertTask({
+    ...existing,
+    state: status.state,
+    percentComplete: status.percentComplete ?? existing.percentComplete,
+    updatedAt: Date.now(),
+    message: status.message,
+  });
+
   store.addEvent({
-    level: 'WARN',
-    message: `Unsupported STANAG message type: ${messageType}`,
+    level: taskStatusLevel(status.state),
+    message: `${status.messageType}: ${status.taskId} ${status.state}${
+      status.percentComplete === undefined ? '' : ` ${status.percentComplete.toFixed(1)}%`
+    }${status.message ? `: ${status.message}` : ''}`,
     payload,
   });
 }
 
+function taskStatusLevel(state: DroneTask['state']): 'INFO' | 'WARN' | 'ERROR' {
+  if (state === 'FAILED' || state === 'REJECTED' || state === 'ABORTED' || state === 'LOST') return 'ERROR';
+  if (state === 'PREEMPTING' || state === 'PREEMPTED' || state === 'CANCELLED') return 'WARN';
+  return 'INFO';
+}
+
 function withDisplayFields(task: DroneTask): DroneTask {
   switch (task.geometry.type) {
-    case 'POINT':
-      return { ...task, geometryType: 'POINT', point: task.geometry.point };
-    case 'CIRCLE':
-      return { ...task, geometryType: 'CIRCLE', point: task.geometry.centre, radiusMeters: task.geometry.radiusMeters };
+    case 'POINT': return { ...task, geometryType: 'POINT', point: task.geometry.point };
+    case 'CIRCLE': return { ...task, geometryType: 'CIRCLE', point: task.geometry.centre, radiusMeters: task.geometry.radiusMeters };
     case 'LINE':
     case 'RECTANGLE':
-    case 'POLYGON':
-      return { ...task, geometryType: task.geometry.type, point: task.geometry.points[0] };
-    case 'CORRIDOR':
-      return { ...task, geometryType: 'CORRIDOR', point: task.geometry.centreLine[0] };
+    case 'POLYGON': return { ...task, geometryType: task.geometry.type, point: task.geometry.points[0] };
+    case 'CORRIDOR': return { ...task, geometryType: 'CORRIDOR', point: task.geometry.centreLine[0] };
   }
 }
 
@@ -239,4 +269,8 @@ function integerValue(value: unknown): number | undefined {
 
 function booleanValue(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
