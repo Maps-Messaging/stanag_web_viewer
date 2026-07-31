@@ -79,6 +79,7 @@ export interface Detection {
   timestamp: number;
   initiatedAt?: number;
   sourceValidUntil?: number;
+  validUntil?: number;
   expiresAt: number;
   rtspUrl?: string;
   raw?: unknown;
