@@ -78,7 +78,8 @@ export interface Detection {
   trackPhase?: string;
   timestamp: number;
   initiatedAt?: number;
-  validUntil?: number;
+  sourceValidUntil?: number;
+  expiresAt: number;
   rtspUrl?: string;
   raw?: unknown;
 }
@@ -107,7 +108,22 @@ export type TaskGeometry =
   | { type: 'POLYGON'; points: GeoPoint[] }
   | { type: 'CORRIDOR'; centreLine: GeoPoint[]; widthMeters: number };
 
-export type TaskState = 'DRAFT' | 'SUBMITTED' | 'ACCEPTED' | 'EXECUTING' | 'CANCEL_REQUESTED' | 'CANCELLED' | 'COMPLETED' | 'FAILED' | 'REJECTED';
+export type TaskState =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'PENDING'
+  | 'ACCEPTED'
+  | 'ACTIVE'
+  | 'EXECUTING'
+  | 'CANCEL_REQUESTED'
+  | 'PREEMPTING'
+  | 'PREEMPTED'
+  | 'CANCELLED'
+  | 'COMPLETED'
+  | 'ABORTED'
+  | 'LOST'
+  | 'FAILED'
+  | 'REJECTED';
 
 export interface DroneTask {
   id: string;
