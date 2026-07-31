@@ -13,7 +13,7 @@ const MOVEMENT_LINE_METRES_PER_METRE_PER_SECOND = 100;
 const MIN_MOVEMENT_LINE_METRES = 10;
 const MAX_MOVEMENT_LINE_METRES = 1_000;
 const MIN_VISIBLE_SPEED_METRES_PER_SECOND = 0.01;
-const DEFAULT_COLLISION_WARNING_DISTANCE_METERS = 50;
+const DEFAULT_COLLISION_WARNING_DISTANCE_METERS = 200;
 const configuredCollisionDistance = Number(import.meta.env.VITE_COLLISION_WARNING_DISTANCE_METERS);
 const COLLISION_WARNING_DISTANCE_METERS = Number.isFinite(configuredCollisionDistance) && configuredCollisionDistance > 0
   ? configuredCollisionDistance
