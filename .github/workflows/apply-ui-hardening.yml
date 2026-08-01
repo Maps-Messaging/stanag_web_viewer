@@ -29,6 +29,7 @@ jobs:
         run: |
           base64 --decode scripts/apply_ui_hardening.py.gz.b64 | gzip --decompress > scripts/apply_ui_hardening.py
           python scripts/apply_ui_hardening.py
+          sed -i 's/private twinFlushTimer?: number;/private twinFlushTimer?: ReturnType<typeof globalThis.setTimeout>;/g' src/messaging/mqttTransport.ts src/messaging/stompTransport.ts
           npm install --save-dev vitest
 
       - name: Run tests
