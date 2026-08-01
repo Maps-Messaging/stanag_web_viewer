@@ -6,6 +6,7 @@ import {
   type CollisionPredictionConfiguration,
   type PredictedCollision,
 } from '../services/collisionPrediction';
+import { formatIso8601Duration } from '../services/taskDuration';
 import { useAppStore } from '../state/useAppStore';
 
 const TASK_GEOMETRY_SOURCE = 'task-geometry';
@@ -484,6 +485,7 @@ function buildTaskFeatures(tasks: DroneTask[], draftPoints: GeoPoint[], taskType
       droneId: task.droneId,
       taskType: task.type,
       state: task.state,
+      duration: formatIso8601Duration(task.duration),
       percentComplete: task.percentComplete,
       updatedAt: new Date(task.updatedAt).toISOString(),
     }));
@@ -540,8 +542,8 @@ function lineFeature(points: GeoPoint[], properties: Record<string, unknown>): G
 }
 
 function polygonFeature(
-    points: GeoPoint[],
-    properties: Record<string, unknown>,
+  points: GeoPoint[],
+  properties: Record<string, unknown>,
 ): GeoJSON.Feature<GeoJSON.Polygon> {
   const closed = closeRing(points);
   return {
@@ -553,6 +555,7 @@ function polygonFeature(
     },
   };
 }
+
 function circleFeature(centre: GeoPoint, radiusMeters: number, properties: Record<string, unknown>): GeoJSON.Feature<GeoJSON.Polygon> {
   const points = Array.from({ length: 65 }, (_, index) => destinationPoint(centre, index / 64 * 360, radiusMeters));
   return polygonFeature(points, { ...properties, radiusMeters, latitude: centre.latitude, longitude: centre.longitude });
