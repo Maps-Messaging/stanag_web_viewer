@@ -54,8 +54,14 @@ export default function App() {
       throw new Error('Connection attempt was superseded');
     }
 
-    const nextTransport = createTransport(nextConfiguration);
+    let nextTransport: MessageTransport | undefined;
     try {
+      nextTransport = await createTransport(nextConfiguration);
+
+      if (generation !== connectionGenerationRef.current) {
+        throw new Error('Connection attempt was superseded');
+      }
+
       await withTimeout(
         nextTransport.connect(),
         CONNECTION_TIMEOUT_MILLIS,
@@ -70,7 +76,7 @@ export default function App() {
       transportRef.current = nextTransport;
       setTransport(nextTransport);
     } catch (error) {
-      await nextTransport.disconnect().catch(() => undefined);
+      await nextTransport?.disconnect().catch(() => undefined);
       if (generation === connectionGenerationRef.current) {
         useAppStore.getState().setConnection(false, 'Connection failed');
         addEvent({ level: 'ERROR', message: `Connection failed: ${String(error)}` });
