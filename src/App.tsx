@@ -16,6 +16,7 @@ import { useAppStore } from './state/useAppStore';
 const DETECTION_NAME = 'DETECT';
 const DETECTION_DURATION_MILLIS = 5_000;
 const DETECTION_EXPIRY_CHECK_MILLIS = 1_000;
+const CONNECTION_TIMEOUT_MILLIS = 15_000;
 
 const theme = createTheme({
   palette: {
@@ -33,31 +34,57 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [transport, setTransport] = useState<MessageTransport>();
   const transportRef = useRef<MessageTransport | undefined>(undefined);
+  const connectionGenerationRef = useRef(0);
   const activeDetectionPulsesRef = useRef(new Set<string>());
 
   async function connect(nextConfiguration: BrokerConfiguration): Promise<void> {
+    const generation = ++connectionGenerationRef.current;
     const previousTransport = transportRef.current;
     transportRef.current = undefined;
     setTransport(undefined);
     useAppStore.getState().setConnection(false, 'Connecting…');
-    await previousTransport?.disconnect();
+
+    try {
+      await previousTransport?.disconnect();
+    } catch (error) {
+      addEvent({ level: 'WARN', message: `Previous transport disconnect failed: ${String(error)}` });
+    }
+
+    if (generation !== connectionGenerationRef.current) {
+      throw new Error('Connection attempt was superseded');
+    }
 
     const nextTransport = createTransport(nextConfiguration);
     try {
-      await nextTransport.connect();
+      await withTimeout(
+        nextTransport.connect(),
+        CONNECTION_TIMEOUT_MILLIS,
+        `Connection timed out after ${CONNECTION_TIMEOUT_MILLIS / 1_000} seconds`,
+      );
+
+      if (generation !== connectionGenerationRef.current) {
+        await nextTransport.disconnect().catch(() => undefined);
+        throw new Error('Connection attempt was superseded');
+      }
+
       transportRef.current = nextTransport;
       setTransport(nextTransport);
     } catch (error) {
       await nextTransport.disconnect().catch(() => undefined);
-      useAppStore.getState().setConnection(false, 'Connection failed');
-      addEvent({ level: 'ERROR', message: `Connection failed: ${String(error)}` });
+      if (generation === connectionGenerationRef.current) {
+        useAppStore.getState().setConnection(false, 'Connection failed');
+        addEvent({ level: 'ERROR', message: `Connection failed: ${String(error)}` });
+      }
       throw error;
     }
   }
 
   useEffect(() => {
     void connect(configuration).catch(() => undefined);
-    return () => { void transportRef.current?.disconnect(); };
+    return () => {
+      connectionGenerationRef.current += 1;
+      void transportRef.current?.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -126,5 +153,21 @@ export default function App() {
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     globalThis.setTimeout(resolve, milliseconds);
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => reject(new Error(message)), milliseconds);
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        globalThis.clearTimeout(timer);
+        reject(error);
+      },
+    );
   });
 }
