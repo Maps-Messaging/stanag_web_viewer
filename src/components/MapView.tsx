@@ -36,6 +36,16 @@ const COLLISION_PREDICTION_CONFIGURATION: CollisionPredictionConfiguration = {
 const TASK_LAYERS = ['task-points', 'task-lines', 'task-volume-fill'];
 const DETECTION_LAYERS = ['detection-points'];
 const PREDICTED_COLLISION_LAYERS = ['predicted-collision-points', 'predicted-collision-drone-outline'];
+const CURRENT_TASK_STATES = new Set([
+  'DRAFT',
+  'SUBMITTED',
+  'PENDING',
+  'ACCEPTED',
+  'ACTIVE',
+  'EXECUTING',
+  'CANCEL_REQUESTED',
+  'PREEMPTING',
+]);
 
 export function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -220,10 +230,77 @@ function addSourcesAndLayers(map: MapLibreMap): void {
   map.addLayer({ id: 'predicted-collision-points', type: 'circle', source: PREDICTED_COLLISION_POINT_SOURCE, paint: { 'circle-radius': 10, 'circle-color': '#d50000', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } });
   map.addLayer({ id: 'detection-points', type: 'circle', source: DETECTION_SOURCE, paint: { 'circle-radius': 9, 'circle-color': '#8e24aa', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } });
   map.addLayer({ id: 'detection-labels', type: 'symbol', source: DETECTION_SOURCE, layout: { 'text-field': ['get', 'name'], 'text-offset': [0, 1.4], 'text-size': 12, 'text-anchor': 'top' }, paint: { 'text-color': '#4a148c', 'text-halo-color': '#ffffff', 'text-halo-width': 2 } });
-  map.addLayer({ id: 'task-volume-fill', type: 'fill', source: TASK_GEOMETRY_SOURCE, paint: { 'fill-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'], 'fill-opacity': 0.16 }, filter: ['==', '$type', 'Polygon'] });
-  map.addLayer({ id: 'task-volume-outline', type: 'line', source: TASK_GEOMETRY_SOURCE, paint: { 'line-width': 3, 'line-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'] }, filter: ['==', '$type', 'Polygon'] });
-  map.addLayer({ id: 'task-lines', type: 'line', source: TASK_GEOMETRY_SOURCE, paint: { 'line-width': 4, 'line-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'], 'line-dasharray': ['case', ['==', ['get', 'kind'], 'draft'], ['literal', [2, 1]], ['literal', [1, 0]]] }, filter: ['==', '$type', 'LineString'] });
-  map.addLayer({ id: 'task-points', type: 'circle', source: TASK_GEOMETRY_SOURCE, paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'draft'], 7, 9], 'circle-color': ['case', ['==', ['get', 'kind'], 'draft'], '#42a5f5', '#ffb300'], 'circle-stroke-width': 2, 'circle-stroke-color': '#111' }, filter: ['==', '$type', 'Point'] });
+  map.addLayer({
+    id: 'task-volume-fill',
+    type: 'fill',
+    source: TASK_GEOMETRY_SOURCE,
+    paint: {
+      'fill-color': taskColourExpression(),
+      'fill-opacity': ['case', ['==', ['get', 'displayState'], 'previous'], 0.08, 0.16],
+    },
+    filter: ['==', '$type', 'Polygon'],
+  });
+  map.addLayer({
+    id: 'task-volume-outline',
+    type: 'line',
+    source: TASK_GEOMETRY_SOURCE,
+    paint: {
+      'line-width': ['case', ['==', ['get', 'displayState'], 'previous'], 2, 3],
+      'line-color': taskColourExpression(),
+      'line-opacity': ['case', ['==', ['get', 'displayState'], 'previous'], 0.65, 1],
+    },
+    filter: ['==', '$type', 'Polygon'],
+  });
+  map.addLayer({
+    id: 'task-lines',
+    type: 'line',
+    source: TASK_GEOMETRY_SOURCE,
+    paint: {
+      'line-width': ['case', ['==', ['get', 'displayState'], 'previous'], 2, 4],
+      'line-color': taskColourExpression(),
+      'line-opacity': ['case', ['==', ['get', 'displayState'], 'previous'], 0.65, 1],
+      'line-dasharray': [
+        'case',
+        ['==', ['get', 'kind'], 'draft'],
+        ['literal', [2, 1]],
+        ['==', ['get', 'displayState'], 'previous'],
+        ['literal', [1, 1]],
+        ['literal', [1, 0]],
+      ],
+    },
+    filter: ['==', '$type', 'LineString'],
+  });
+  map.addLayer({
+    id: 'task-points',
+    type: 'circle',
+    source: TASK_GEOMETRY_SOURCE,
+    paint: {
+      'circle-radius': [
+        'case',
+        ['==', ['get', 'kind'], 'draft'],
+        7,
+        ['==', ['get', 'displayState'], 'previous'],
+        6,
+        9,
+      ],
+      'circle-color': taskColourExpression(),
+      'circle-opacity': ['case', ['==', ['get', 'displayState'], 'previous'], 0.75, 1],
+      'circle-stroke-width': 2,
+      'circle-stroke-color': '#111',
+    },
+    filter: ['==', '$type', 'Point'],
+  });
+}
+
+function taskColourExpression(): maplibregl.ExpressionSpecification {
+  return [
+    'case',
+    ['==', ['get', 'kind'], 'draft'],
+    '#42a5f5',
+    ['==', ['get', 'displayState'], 'previous'],
+    '#78909c',
+    '#ffb300',
+  ];
 }
 
 function updateTaskSource(map: MapLibreMap, tasks: DroneTask[], draftPoints: GeoPoint[], taskType: string | undefined): void {
@@ -395,10 +472,52 @@ function buildTaskFeatures(tasks: DroneTask[], draftPoints: GeoPoint[], taskType
     draftPoints.forEach((point, index) => features.push(pointFeature(point, { kind: 'draft', label: `Draft point ${index + 1}`, taskType })));
     if (draftPoints.length >= 2) features.push(lineFeature(draftPoints, { kind: 'draft', label: `${taskType} draft`, taskType }));
   }
-  tasks.filter((task) => !['COMPLETED', 'CANCELLED'].includes(task.state)).forEach((task) => features.push(...geometryFeatures(task.geometry, {
-    kind: 'task', label: `${task.type} ${task.geometry.type}`, taskId: task.id, taskType: task.type, state: task.state, percentComplete: task.percentComplete,
-  })));
+
+  visibleTasks(tasks).forEach(({ task, displayState }) => {
+    features.push(...geometryFeatures(task.geometry, {
+      kind: 'task',
+      displayState,
+      label: displayState === 'current'
+        ? `${task.type} ${task.geometry.type}`
+        : `Previous ${task.type} ${task.geometry.type}`,
+      taskId: task.id,
+      droneId: task.droneId,
+      taskType: task.type,
+      state: task.state,
+      percentComplete: task.percentComplete,
+      updatedAt: new Date(task.updatedAt).toISOString(),
+    }));
+  });
+
   return features;
+}
+
+function visibleTasks(tasks: DroneTask[]): Array<{ task: DroneTask; displayState: 'current' | 'previous' }> {
+  const byDrone = new Map<string, DroneTask[]>();
+
+  tasks.forEach((task) => {
+    if (task.state === 'REJECTED') return;
+    const droneTasks = byDrone.get(task.droneId) ?? [];
+    droneTasks.push(task);
+    byDrone.set(task.droneId, droneTasks);
+  });
+
+  const visible: Array<{ task: DroneTask; displayState: 'current' | 'previous' }> = [];
+  byDrone.forEach((droneTasks) => {
+    const ordered = [...droneTasks].sort(compareTasksNewestFirst);
+    const current = ordered.find((task) => CURRENT_TASK_STATES.has(task.state));
+    if (current) visible.push({ task: current, displayState: 'current' });
+
+    const previous = ordered.find((task) => task.id !== current?.id);
+    if (previous) visible.push({ task: previous, displayState: 'previous' });
+  });
+
+  return visible;
+}
+
+function compareTasksNewestFirst(left: DroneTask, right: DroneTask): number {
+  const updatedDifference = right.updatedAt - left.updatedAt;
+  return updatedDifference !== 0 ? updatedDifference : right.createdAt - left.createdAt;
 }
 
 function geometryFeatures(geometry: TaskGeometry, properties: Record<string, unknown>): GeoJSON.Feature[] {
@@ -422,7 +541,7 @@ function lineFeature(points: GeoPoint[], properties: Record<string, unknown>): G
 
 function polygonFeature(points: GeoPoint[], properties: Record<string, unknown>): GeoJSON.Feature<GeoJSON.Polygon> {
   const closed = closeRing(points);
-  return { type: 'Feature', properties, geometry: { type: 'Polygon', coordinates: [closed.map((point) => [point.longitude, point.latitude])] } };
+  return { type: 'Feature', properties, geometry: { type: 'Polygon', coordinates: [closed.map((point) => [point.longitude, point.latitude])] };
 }
 
 function circleFeature(centre: GeoPoint, radiusMeters: number, properties: Record<string, unknown>): GeoJSON.Feature<GeoJSON.Polygon> {
