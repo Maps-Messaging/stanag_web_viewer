@@ -1,13 +1,15 @@
 import type { BrokerConfiguration } from '../models/types';
-import { MqttTransport } from './mqttTransport';
-import { StompTransport } from './stompTransport';
 import type { MessageTransport } from './transport';
 
-export function createTransport(configuration: BrokerConfiguration): MessageTransport {
+export async function createTransport(configuration: BrokerConfiguration): Promise<MessageTransport> {
   switch (configuration.transport) {
-    case 'mqtt':
+    case 'mqtt': {
+      const { MqttTransport } = await import('./mqttTransport');
       return new MqttTransport(configuration);
-    case 'stomp':
+    }
+    case 'stomp': {
+      const { StompTransport } = await import('./stompTransport');
       return new StompTransport(configuration);
+    }
   }
 }
