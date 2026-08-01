@@ -60,8 +60,8 @@ export function applyTaskDuration(payload: unknown, task: DroneTask): unknown {
       description: {
         ...payload.body.description,
         [taskField]: {
-          duration,
           ...concreteTask,
+          duration,
         },
       },
     },
