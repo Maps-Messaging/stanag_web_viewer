@@ -12,7 +12,9 @@ The application connects to MapsMessaging through either STOMP over WebSockets o
 - Shows active task geometry and map-drafted task geometry.
 - Displays dynamic track detections with metadata and optional RTSP URLs.
 - Removes detections two minutes after their most recent update.
-- Warns when positioned vehicles are within the configured collision distance.
+- Warns when positioned vehicles are within the configured immediate collision distance.
+- Predicts potential collisions using Closest Point of Approach (CPA) over a configurable look-ahead period.
+- Applies vehicle-domain and altitude rules for UAV, UGV, USV, and UUV conflict prediction.
 - Provides metric map scale and navigation controls.
 - Publishes a short MAVLink `NAMED_VALUE_FLOAT` detection assertion from the vehicle list.
 
@@ -69,21 +71,116 @@ The map includes:
 - movement projection based on ground speed and course;
 - active and draft task points, routes, polygons, circles, and corridors;
 - dynamic detection points and labels;
-- collision-warning regions around conflicting vehicles;
-- readable dark-themed popups for tasks and detections;
+- red immediate-collision regions around vehicles already inside the configured distance;
+- orange predicted-collision regions around vehicles involved in a future CPA conflict;
+- a red marker at each predicted conflict point;
+- readable dark-themed popups for tasks, detections, and predicted conflicts;
 - metric scale and zoom/rotation controls.
 
 Completed and cancelled task geometry is removed from the active map display.
 
-### Collision distance
+## Collision warnings
 
-The default collision-warning distance is 200 metres. Override it at build time with:
+### Immediate collision distance
+
+The default immediate collision-warning distance is 200 metres. Override it at build time with:
 
 ```text
 VITE_COLLISION_WARNING_DISTANCE_METERS=50
 ```
 
-A warning region is drawn only when at least two positioned vehicles are within the configured distance.
+A red warning region is drawn only when at least two positioned vehicles are already within the configured distance.
+
+Immediate red warnings have higher display priority than predicted orange warnings. A vehicle already involved in an immediate conflict is not also shown as a predicted conflict participant.
+
+### Predicted collision using CPA
+
+The viewer predicts future conflicts using a Closest Point of Approach calculation.
+
+For every vehicle pair, the prediction engine calculates:
+
+- relative position;
+- relative velocity from course or heading and ground speed;
+- Time to Closest Point of Approach (TCPA);
+- horizontal separation at CPA;
+- projected altitude at CPA using climb rate where available;
+- vertical separation where the vehicle domains require it.
+
+A predicted conflict is displayed when:
+
+- the CPA occurs inside the configured look-ahead period, which defaults to 300 seconds;
+- horizontal separation at CPA is inside the configured prediction threshold;
+- vehicle-domain and vertical-clearance rules indicate that a physical collision is plausible.
+
+Orange circles identify the involved vehicles. A red point marks the predicted conflict location. Clicking the predicted conflict marker shows the vehicle names, domains, TCPA, horizontal CPA distance, vertical separation where available, and projected coordinates.
+
+### Vehicle domains and vertical rules
+
+The prediction engine normalises vehicles into these domains:
+
+- `AIR` for UAVs;
+- `SURFACE` for USVs;
+- `GROUND` for UGVs;
+- `SUBSURFACE` for UUVs;
+- `UNKNOWN` when the domain cannot be determined safely.
+
+The domain is derived first from digital-twin `vehicleClass` and then from the STANAG symbol set.
+
+Conflict rules are deliberately conservative:
+
+| Pair | Vertical handling |
+| --- | --- |
+| UAV and UAV | Requires compatible altitude values and vertical separation within the configured threshold. |
+| UAV and USV/UGV | Warns only when the aircraft is within the configured surface-interaction clearance of the other vehicle. |
+| USV and USV | Ignores altitude and uses horizontal CPA. |
+| UGV and UGV | Ignores altitude and uses horizontal CPA. |
+| UUV and UUV | Uses horizontal CPA unless a later depth-specific model is introduced. |
+| Unknown cross-domain pair | Suppressed to avoid false positive alerts. |
+
+The prediction is advisory. It assumes the current course, speed, and climb rate continue during the look-ahead period. Vehicle manoeuvres or stale telemetry can invalidate the prediction.
+
+### Collision prediction configuration
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `VITE_COLLISION_WARNING_DISTANCE_METERS` | `200` | Immediate red-warning distance and default CPA horizontal threshold. |
+| `VITE_COLLISION_PREDICTION_DISTANCE_METERS` | Immediate threshold | Horizontal separation threshold for predicted CPA conflicts. |
+| `VITE_COLLISION_LOOK_AHEAD_SECONDS` | `300` | Maximum TCPA look-ahead period. |
+| `VITE_COLLISION_VERTICAL_DISTANCE_METERS` | `30` | Maximum UAV-to-UAV vertical separation for a predicted conflict. |
+| `VITE_SURFACE_INTERACTION_ALTITUDE_METERS` | `20` | Maximum UAV clearance above a surface or ground vehicle for cross-domain conflict prediction. |
+
+## Collision prediction performance
+
+The current implementation performs an all-pairs comparison whenever vehicle-derived map sources are refreshed.
+
+The pair count is:
+
+```text
+pairs = n × (n - 1) / 2
+```
+
+| Vehicles | Pair comparisons per prediction pass |
+| ---: | ---: |
+| 10 | 45 |
+| 50 | 1,225 |
+| 100 | 4,950 |
+| 200 | 19,900 |
+| 500 | 124,750 |
+| 1,000 | 499,500 |
+
+The CPA arithmetic is small compared with browser and MapLibre rendering costs. Track lines, markers, labels, circles, and GeoJSON updates are likely to become the practical bottleneck before the vector calculations themselves.
+
+Approximate scaling guidance:
+
+| Vehicles | Guidance |
+| ---: | --- |
+| Fewer than 100 | No collision-specific optimisation should be required on a normal desktop. |
+| 100 to 250 | The current implementation should remain suitable, but representative browser testing is recommended. |
+| 250 to 500 | Consider throttling CPA recalculation to 4-10 Hz instead of every rendered telemetry refresh. |
+| More than 500 | Introduce spatial partitioning, such as a fixed grid or R-tree, so distant vehicles are not compared. |
+| Around 1,000 or more | Use spatial indexing, incremental updates, and likely move prediction work to a Web Worker or server-side service. |
+
+These are engineering guidelines rather than guaranteed limits. Actual capacity depends on telemetry frequency, browser, computer, number of rendered tracks, number of active warnings, and map complexity. Benchmark with representative data before relying on a particular fleet-size limit.
 
 ## Dynamic detections
 
@@ -136,7 +233,11 @@ Common build-time environment variables:
 | `VITE_TASK_ADMIN_TOPIC` | Per-vehicle task-admin destination template. |
 | `VITE_SOURCE_UUID` | Source UUID placed in outgoing STANAG headers. |
 | `VITE_STANAG_VERSION` | STANAG version written to outgoing headers. |
-| `VITE_COLLISION_WARNING_DISTANCE_METERS` | Collision-warning threshold in metres. |
+| `VITE_COLLISION_WARNING_DISTANCE_METERS` | Immediate collision-warning threshold in metres. |
+| `VITE_COLLISION_PREDICTION_DISTANCE_METERS` | Predicted CPA horizontal threshold in metres. |
+| `VITE_COLLISION_LOOK_AHEAD_SECONDS` | Predicted collision look-ahead period in seconds. |
+| `VITE_COLLISION_VERTICAL_DISTANCE_METERS` | UAV vertical conflict threshold in metres. |
+| `VITE_SURFACE_INTERACTION_ALTITUDE_METERS` | UAV clearance threshold for surface/ground interactions. |
 
 Current defaults include:
 
@@ -144,6 +245,10 @@ Current defaults include:
 VITE_DRONE_TOPIC=4817/catl/maps/json/+/+
 VITE_TASK_ADMIN_TOPIC=4817/catl/maps/json/{droneId}/MessageTypeEnum_TASK_ADMIN
 VITE_STANAG_VERSION=0.3.0
+VITE_COLLISION_WARNING_DISTANCE_METERS=200
+VITE_COLLISION_LOOK_AHEAD_SECONDS=300
+VITE_COLLISION_VERTICAL_DISTANCE_METERS=30
+VITE_SURFACE_INTERACTION_ALTITUDE_METERS=20
 ```
 
 ## Development
