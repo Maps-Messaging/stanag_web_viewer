@@ -100,6 +100,12 @@ export type TaskType =
   | 'SURVEY'
   | 'SCREEN';
 
+export interface TaskDuration {
+  hours: number;
+  minutes: number;
+  seconds: number;
+}
+
 export type TaskGeometryType = 'POINT' | 'CIRCLE' | 'LINE' | 'RECTANGLE' | 'POLYGON' | 'CORRIDOR';
 export type TaskGeometry =
   | { type: 'POINT'; point: GeoPoint }
@@ -135,6 +141,7 @@ export interface DroneTask {
   geometryType: TaskGeometryType;
   point: GeoPoint;
   radiusMeters?: number;
+  duration?: TaskDuration;
   state: TaskState;
   createdAt: number;
   updatedAt: number;
