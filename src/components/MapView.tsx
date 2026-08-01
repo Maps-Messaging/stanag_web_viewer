@@ -539,11 +539,20 @@ function lineFeature(points: GeoPoint[], properties: Record<string, unknown>): G
   return { type: 'Feature', properties, geometry: { type: 'LineString', coordinates: points.map((point) => [point.longitude, point.latitude]) } };
 }
 
-function polygonFeature(points: GeoPoint[], properties: Record<string, unknown>): GeoJSON.Feature<GeoJSON.Polygon> {
+function polygonFeature(
+    points: GeoPoint[],
+    properties: Record<string, unknown>,
+): GeoJSON.Feature<GeoJSON.Polygon> {
   const closed = closeRing(points);
-  return { type: 'Feature', properties, geometry: { type: 'Polygon', coordinates: [closed.map((point) => [point.longitude, point.latitude])] };
+  return {
+    type: 'Feature',
+    properties,
+    geometry: {
+      type: 'Polygon',
+      coordinates: [closed.map((point) => [point.longitude, point.latitude])],
+    },
+  };
 }
-
 function circleFeature(centre: GeoPoint, radiusMeters: number, properties: Record<string, unknown>): GeoJSON.Feature<GeoJSON.Polygon> {
   const points = Array.from({ length: 65 }, (_, index) => destinationPoint(centre, index / 64 * 360, radiusMeters));
   return polygonFeature(points, { ...properties, radiusMeters, latitude: centre.latitude, longitude: centre.longitude });
