@@ -1,4 +1,4 @@
-import type { TaskDuration, TaskType } from '../models/types';
+import type { DroneTask, TaskDuration, TaskType } from '../models/types';
 
 const DURATION_TASK_TYPES = new Set<TaskType>([
   'PATROL',
@@ -39,6 +39,37 @@ export function formatIso8601Duration(duration: TaskDuration | undefined): strin
   if (duration.minutes > 0) value += `${duration.minutes}M`;
   if (duration.seconds > 0) value += `${duration.seconds}S`;
   return value;
+}
+
+export function applyTaskDuration(payload: unknown, task: DroneTask): unknown {
+  if (!supportsDuration(task.type)) return payload;
+  const duration = formatIso8601Duration(task.duration);
+  if (!duration) return payload;
+  if (!isObject(payload) || !isObject(payload.body) || !isObject(payload.body.description)) {
+    throw new Error('Cannot apply duration to malformed TASK_ADMIN payload');
+  }
+
+  const taskField = task.type.toLowerCase();
+  const concreteTask = payload.body.description[taskField];
+  if (!isObject(concreteTask)) throw new Error(`TASK_ADMIN description is missing ${taskField}`);
+
+  return {
+    ...payload,
+    body: {
+      ...payload.body,
+      description: {
+        ...payload.body.description,
+        [taskField]: {
+          duration,
+          ...concreteTask,
+        },
+      },
+    },
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function capitalise(value: string): string {
