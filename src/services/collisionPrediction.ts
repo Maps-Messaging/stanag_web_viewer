@@ -97,7 +97,7 @@ function predictPair(
 
   const leftDomain = mobilityDomain(left);
   const rightDomain = mobilityDomain(right);
-  const vertical = verticalConflict(left, right, leftAtCpa, rightAtCpa, leftDomain, rightDomain, configuration);
+  const vertical = verticalConflict(leftAtCpa, rightAtCpa, leftDomain, rightDomain, configuration);
   if (!vertical.accepted) return undefined;
 
   return {
@@ -115,8 +115,6 @@ function predictPair(
 }
 
 function verticalConflict(
-  left: MovingDrone,
-  right: MovingDrone,
   leftAtCpa: GeoPoint,
   rightAtCpa: GeoPoint,
   leftDomain: MobilityDomain,
@@ -136,19 +134,27 @@ function verticalConflict(
 
   if (leftDomain === 'AIR' || rightDomain === 'AIR') {
     const airAltitude = leftDomain === 'AIR' ? leftAltitude : rightAltitude;
-    if (airAltitude === undefined) return { accepted: false };
+    const otherAltitude = leftDomain === 'AIR' ? rightAltitude : leftAltitude;
     const otherDomain = leftDomain === 'AIR' ? rightDomain : leftDomain;
-    if (otherDomain === 'UNKNOWN') return { accepted: false };
+    if (airAltitude === undefined || otherDomain === 'UNKNOWN') return { accepted: false };
+
+    const clearance = otherAltitude === undefined ? airAltitude : Math.abs(airAltitude - otherAltitude);
     return {
-      accepted: airAltitude <= configuration.surfaceInteractionAltitudeMeters,
-      separationMeters: rightAltitude === undefined || leftAltitude === undefined
-        ? undefined
-        : Math.abs(leftAltitude - rightAltitude),
+      accepted: clearance <= configuration.surfaceInteractionAltitudeMeters,
+      separationMeters: otherAltitude === undefined ? undefined : clearance,
     };
   }
 
   if (leftDomain === 'UNKNOWN' || rightDomain === 'UNKNOWN') return { accepted: false };
-  return { accepted: leftDomain === rightDomain };
+
+  if ((leftDomain === 'SURFACE' && rightDomain === 'SUBSURFACE')
+      || (leftDomain === 'SUBSURFACE' && rightDomain === 'SURFACE')) {
+    if (leftAltitude === undefined || rightAltitude === undefined) return { accepted: false };
+    const separation = Math.abs(leftAltitude - rightAltitude);
+    return { accepted: separation <= configuration.verticalThresholdMeters, separationMeters: separation };
+  }
+
+  return { accepted: false };
 }
 
 function normaliseClass(value: unknown): MobilityDomain | undefined {
