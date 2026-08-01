@@ -4,8 +4,9 @@ import SendIcon from '@mui/icons-material/Send';
 import { Alert, Box, Button, Divider, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import type { DroneTask, GeoPoint, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
+import type { DroneTask, GeoPoint, TaskDuration, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
 import type { MessageTransport } from '../messaging/transport';
+import { supportsDuration, validateTaskDuration } from '../services/taskDuration';
 import { createUuid } from '../services/uuid';
 import { useAppStore } from '../state/useAppStore';
 
@@ -54,6 +55,9 @@ export function TaskPanel({ transport }: Props) {
   const [altitude, setAltitude] = useState(100);
   const [radius, setRadius] = useState(50);
   const [corridorWidth, setCorridorWidth] = useState(100);
+  const [durationHours, setDurationHours] = useState('0');
+  const [durationMinutes, setDurationMinutes] = useState('0');
+  const [durationSeconds, setDurationSeconds] = useState('0');
 
   const supportedTaskTypes = useMemo(() => {
     if (!selectedDrone) return [];
@@ -79,7 +83,17 @@ export function TaskPanel({ transport }: Props) {
   const geometryError = effectiveGeometryType
     ? validateDraftGeometry(effectiveGeometryType, draftPoints.length, radius, corridorWidth)
     : 'Choose a supported task type.';
-  const canSubmit = Boolean(selectedDrone && taskType && authorityGuid && transport && effectiveGeometryType && !geometryError);
+  const durationFieldErrors = durationErrors(durationHours, durationMinutes, durationSeconds);
+  const durationError = Object.values(durationFieldErrors).find(Boolean);
+  const canSubmit = Boolean(
+    selectedDrone
+      && taskType
+      && authorityGuid
+      && transport
+      && effectiveGeometryType
+      && !geometryError
+      && (!supportsDuration(taskType) || !durationError),
+  );
 
   function chooseTask(type: TaskType): void {
     const defaultGeometry = TASK_GEOMETRIES[type][0];
@@ -90,9 +104,13 @@ export function TaskPanel({ transport }: Props) {
 
   async function submit(): Promise<void> {
     if (!selectedDrone || !taskType || !authorityGuid || !transport || !effectiveGeometryType || geometryError) return;
+    if (supportsDuration(taskType) && durationError) return;
 
     const geometry = buildGeometry(effectiveGeometryType, draftPoints, altitude, radius, corridorWidth);
     const summary = geometrySummary(geometry);
+    const duration = supportsDuration(taskType)
+      ? parseTaskDuration(durationHours, durationMinutes, durationSeconds)
+      : undefined;
     const task: DroneTask = {
       id: createUuid(),
       droneId: selectedDrone.id,
@@ -102,6 +120,7 @@ export function TaskPanel({ transport }: Props) {
       geometryType: geometry.type,
       point: summary.point,
       radiusMeters: summary.radiusMeters,
+      ...(duration && totalDurationSeconds(duration) > 0 ? { duration } : {}),
       state: 'SUBMITTED',
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -182,6 +201,18 @@ export function TaskPanel({ transport }: Props) {
         {effectiveGeometryType === 'CIRCLE' && <TextField label="Radius (m)" type="number" value={radius} onChange={(event) => setRadius(Number(event.target.value))} inputProps={{ min: 1 }} />}
         {effectiveGeometryType === 'CORRIDOR' && <TextField label="Corridor width (m)" type="number" value={corridorWidth} onChange={(event) => setCorridorWidth(Number(event.target.value))} inputProps={{ min: 1 }} />}
 
+        {supportsDuration(taskType) && (
+          <Box>
+            <Typography variant="overline">Optional duration</Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1 }}>
+              <DurationField label="Hours" value={durationHours} error={durationFieldErrors.hours} onChange={setDurationHours} />
+              <DurationField label="Minutes" value={durationMinutes} error={durationFieldErrors.minutes} onChange={setDurationMinutes} max={59} />
+              <DurationField label="Seconds" value={durationSeconds} error={durationFieldErrors.seconds} onChange={setDurationSeconds} max={59} />
+            </Box>
+            <Typography variant="caption" color="text.secondary">Leave all values at zero to omit duration.</Typography>
+          </Box>
+        )}
+
         {taskType && <Typography variant="body2">Selected map points: {draftPoints.length}</Typography>}
         {taskType && draftPoints.map((point, index) => (
           <Typography key={`${point.latitude}-${point.longitude}-${index}`} variant="caption" color="text.secondary">
@@ -218,6 +249,63 @@ export function TaskPanel({ transport }: Props) {
       ) : <Typography variant="body2" color="text.secondary">No task for this drone.</Typography>}
     </Paper>
   );
+}
+
+interface DurationFieldProps {
+  label: string;
+  value: string;
+  error?: string;
+  max?: number;
+  onChange: (value: string) => void;
+}
+
+function DurationField({ label, value, error, max, onChange }: DurationFieldProps) {
+  return (
+    <TextField
+      label={label}
+      type="number"
+      value={value}
+      error={Boolean(error)}
+      helperText={error}
+      onChange={(event) => onChange(event.target.value)}
+      inputProps={{ min: 0, max, step: 1, inputMode: 'numeric' }}
+    />
+  );
+}
+
+function durationErrors(hours: string, minutes: string, seconds: string): Partial<Record<keyof TaskDuration, string>> {
+  const values = { hours, minutes, seconds };
+  const errors: Partial<Record<keyof TaskDuration, string>> = {};
+
+  (Object.keys(values) as Array<keyof TaskDuration>).forEach((field) => {
+    const raw = values[field].trim();
+    if (!/^\d+$/.test(raw)) {
+      errors[field] = `${capitalise(field)} must be a non-negative whole number.`;
+      return;
+    }
+    const value = Number(raw);
+    if ((field === 'minutes' || field === 'seconds') && value > 59) {
+      errors[field] = `${capitalise(field)} must be between 0 and 59.`;
+    }
+  });
+
+  if (Object.keys(errors).length === 0) {
+    const validationError = validateTaskDuration(parseTaskDuration(hours, minutes, seconds));
+    if (validationError) errors.hours = validationError;
+  }
+  return errors;
+}
+
+function parseTaskDuration(hours: string, minutes: string, seconds: string): TaskDuration {
+  return { hours: Number(hours), minutes: Number(minutes), seconds: Number(seconds) };
+}
+
+function totalDurationSeconds(duration: TaskDuration): number {
+  return duration.hours * 3600 + duration.minutes * 60 + duration.seconds;
+}
+
+function capitalise(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function getTaskGridColumnCount(taskCount: number): number {
