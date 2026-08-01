@@ -1,0 +1,48 @@
+name: Apply UI hardening
+
+on:
+  push:
+    branches:
+      - agent/ui-timing-usability-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[ui-hardening-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply changes
+        run: |
+          base64 --decode scripts/apply_ui_hardening.py.gz.b64 | gzip --decompress > /tmp/apply_ui_hardening.py
+          python /tmp/apply_ui_hardening.py
+          npm install --save-dev vitest
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit validated changes
+        run: |
+          rm -f scripts/apply_ui_hardening.py.gz.b64
+          rm -f .github/workflows/apply-ui-hardening.yml
+          rmdir scripts 2>/dev/null || true
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden UI timing and usability [ui-hardening-applied]"
+          git push origin HEAD:agent/ui-timing-usability-hardening
