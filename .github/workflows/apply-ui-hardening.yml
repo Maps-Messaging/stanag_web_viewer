@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/ui-timing-usability-hardening
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -35,6 +38,7 @@ jobs:
         run: npm run build
 
       - name: Commit validated changes
+        if: github.event_name == 'push'
         run: |
           rm -f scripts/apply_ui_hardening.py.gz.b64
           rm -f .github/workflows/apply-ui-hardening.yml
