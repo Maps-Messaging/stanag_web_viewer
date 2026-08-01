@@ -40,7 +40,7 @@ export function predictCollisions(
   immediateConflictDroneIds: ReadonlySet<string>,
   configuration: CollisionPredictionConfiguration,
 ): PredictedCollision[] {
-  const moving = drones.filter((drone): drone is MovingDrone => Boolean(drone.position));
+  const moving = drones.filter((drone): drone is MovingDrone => Boolean(drone.position) && !drone.stale);
   const predictions: PredictedCollision[] = [];
 
   for (let leftIndex = 0; leftIndex < moving.length; leftIndex += 1) {
@@ -55,6 +55,16 @@ export function predictCollisions(
   }
 
   return predictions;
+}
+
+export function hasImmediateCollisionRisk(
+  left: Drone & { position: GeoPoint },
+  right: Drone & { position: GeoPoint },
+  configuration: CollisionPredictionConfiguration,
+): boolean {
+  const leftDomain = mobilityDomain(left);
+  const rightDomain = mobilityDomain(right);
+  return verticalConflict(left.position, right.position, leftDomain, rightDomain, configuration).accepted;
 }
 
 export function mobilityDomain(drone: Drone): MobilityDomain {

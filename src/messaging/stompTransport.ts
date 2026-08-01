@@ -22,7 +22,7 @@ export class StompTransport implements MessageTransport {
   private client?: Client;
   private subscriptions: StompSubscription[] = [];
   private readonly pendingTwinMessages = new Map<string, IMessage>();
-  private twinFlushFrame?: number;
+  private twinFlushTimer?: ReturnType<typeof globalThis.setTimeout>;
 
   constructor(private readonly configuration: BrokerConfiguration) {}
 
@@ -137,22 +137,22 @@ export class StompTransport implements MessageTransport {
   private handleTwinMessage(message: IMessage): void {
     const destination = message.headers.destination ?? TWIN_TOPIC;
     this.pendingTwinMessages.set(destination, message);
-    if (this.twinFlushFrame !== undefined) return;
+    if (this.twinFlushTimer !== undefined) return;
 
-    this.twinFlushFrame = globalThis.requestAnimationFrame(() => this.flushPendingTwinMessages());
+    this.twinFlushTimer = globalThis.setTimeout(() => this.flushPendingTwinMessages(), 100);
   }
 
   private flushPendingTwinMessages(): void {
-    this.twinFlushFrame = undefined;
+    this.twinFlushTimer = undefined;
     const messages = Array.from(this.pendingTwinMessages.values());
     this.pendingTwinMessages.clear();
     messages.forEach((message) => this.parse(message, dispatchTwinMessage));
   }
 
   private clearPendingTwinMessages(): void {
-    if (this.twinFlushFrame !== undefined) {
-      globalThis.cancelAnimationFrame(this.twinFlushFrame);
-      this.twinFlushFrame = undefined;
+    if (this.twinFlushTimer !== undefined) {
+      globalThis.clearTimeout(this.twinFlushTimer);
+      this.twinFlushTimer = undefined;
     }
     this.pendingTwinMessages.clear();
   }

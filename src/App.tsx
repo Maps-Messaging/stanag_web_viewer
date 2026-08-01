@@ -10,6 +10,7 @@ import { createTransport } from './messaging/transportFactory';
 import type { MessageTransport } from './messaging/transport';
 import type { BrokerConfiguration } from './models/types';
 import { buildNamedValueFloatEvent, namedValueFloatTopic } from './services/mavlinkEvents';
+import { TELEMETRY_STALE_MILLIS } from './services/operationalState';
 import { useAppStore } from './state/useAppStore';
 
 const DETECTION_NAME = 'DETECT';
@@ -32,57 +33,77 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [transport, setTransport] = useState<MessageTransport>();
   const transportRef = useRef<MessageTransport | undefined>(undefined);
+  const activeDetectionPulsesRef = useRef(new Set<string>());
 
   async function connect(nextConfiguration: BrokerConfiguration): Promise<void> {
+    const previousTransport = transportRef.current;
+    transportRef.current = undefined;
+    setTransport(undefined);
+    useAppStore.getState().setConnection(false, 'Connecting…');
+    await previousTransport?.disconnect();
+
+    const nextTransport = createTransport(nextConfiguration);
     try {
-      await transportRef.current?.disconnect();
-      const nextTransport = createTransport(nextConfiguration);
+      await nextTransport.connect();
       transportRef.current = nextTransport;
       setTransport(nextTransport);
-      await nextTransport.connect();
     } catch (error) {
+      await nextTransport.disconnect().catch(() => undefined);
       useAppStore.getState().setConnection(false, 'Connection failed');
       addEvent({ level: 'ERROR', message: `Connection failed: ${String(error)}` });
+      throw error;
     }
   }
 
   useEffect(() => {
-    void connect(configuration);
+    void connect(configuration).catch(() => undefined);
     return () => { void transportRef.current?.disconnect(); };
   }, []);
 
   useEffect(() => {
     const timer = globalThis.setInterval(() => {
-      useAppStore.getState().purgeExpiredDetections();
+      const store = useAppStore.getState();
+      store.purgeExpiredDetections();
+      store.refreshTelemetryFreshness(Date.now(), TELEMETRY_STALE_MILLIS);
     }, DETECTION_EXPIRY_CHECK_MILLIS);
     return () => globalThis.clearInterval(timer);
   }, []);
 
   async function applySettings(nextConfiguration: BrokerConfiguration): Promise<void> {
+    await connect(nextConfiguration);
     updateConfiguration(nextConfiguration);
     setSettingsOpen(false);
-    await connect(nextConfiguration);
   }
 
   async function detectDrone(droneId: string): Promise<void> {
     const drone = useAppStore.getState().drones[droneId];
-    const currentTransport = transportRef.current;
-
     if (!drone) throw new Error(`Unknown drone ${droneId}`);
-    if (!currentTransport) throw new Error('Message transport is not connected');
+    if (activeDetectionPulsesRef.current.has(droneId)) throw new Error(`Detection is already active for ${drone.name}`);
 
     const systemId = drone.twin?.systemId;
     const componentId = drone.twin?.componentId ?? 1;
     if (systemId === undefined) throw new Error(`MAVLink system ID is unavailable for ${drone.name}`);
 
     const destination = namedValueFloatTopic(systemId);
-    await currentTransport.publishEvent(destination, buildNamedValueFloatEvent(systemId, componentId, DETECTION_NAME, 1));
-    addEvent({ level: 'INFO', message: `Detection asserted for ${drone.name}` });
-
-    await delay(DETECTION_DURATION_MILLIS);
-
-    await currentTransport.publishEvent(destination, buildNamedValueFloatEvent(systemId, componentId, DETECTION_NAME, 0));
-    addEvent({ level: 'INFO', message: `Detection cleared for ${drone.name}` });
+    activeDetectionPulsesRef.current.add(droneId);
+    try {
+      const currentTransport = transportRef.current;
+      if (!currentTransport) throw new Error('Message transport is not connected');
+      await currentTransport.publishEvent(destination, buildNamedValueFloatEvent(systemId, componentId, DETECTION_NAME, 1));
+      addEvent({ level: 'INFO', message: `Detection asserted for ${drone.name}` });
+      await delay(DETECTION_DURATION_MILLIS);
+    } finally {
+      activeDetectionPulsesRef.current.delete(droneId);
+      const currentTransport = transportRef.current;
+      if (currentTransport) {
+        try {
+          await currentTransport.publishEvent(destination, buildNamedValueFloatEvent(systemId, componentId, DETECTION_NAME, 0));
+          addEvent({ level: 'INFO', message: `Detection cleared for ${drone.name}` });
+        } catch (error) {
+          addEvent({ level: 'ERROR', message: `Detection clear failed for ${drone.name}: ${String(error)}` });
+        }
+      }
+    }
   }
 
   return (

@@ -21,7 +21,8 @@ const MAVLINK_STATUS_TOPIC_PATTERN = /^\/mavlink\/(\d+)\/status$/;
 
 export class MqttTransport implements MessageTransport {
   private client?: MqttClient;
-  private readonly lastTwinProcessedAt = new Map<string, number>();
+  private readonly pendingTwinMessages = new Map<string, string>();
+  private twinFlushTimer?: ReturnType<typeof globalThis.setTimeout>;
 
   constructor(private readonly configuration: BrokerConfiguration) {}
 
@@ -69,7 +70,7 @@ export class MqttTransport implements MessageTransport {
 
     await this.client.endAsync();
     this.client = undefined;
-    this.lastTwinProcessedAt.clear();
+    this.clearPendingTwinMessages();
     useAppStore.getState().setConnection(false, 'Disconnected');
   }
 
@@ -105,8 +106,7 @@ export class MqttTransport implements MessageTransport {
 
     try {
       if (topicMatches(TWIN_TOPIC, topic)) {
-        if (!this.shouldProcessTwin(topic)) return;
-        dispatchTwinMessage(JSON.parse(body));
+        this.queueTwinMessage(topic, body);
         return;
       }
 
@@ -132,13 +132,23 @@ export class MqttTransport implements MessageTransport {
     }
   }
 
-  private shouldProcessTwin(topic: string): boolean {
-    const now = Date.now();
-    const previous = this.lastTwinProcessedAt.get(topic);
-    if (previous !== undefined && now - previous < TWIN_UPDATE_MINIMUM_INTERVAL_MILLIS) return false;
+  private queueTwinMessage(topic: string, body: string): void {
+    this.pendingTwinMessages.set(topic, body);
+    if (this.twinFlushTimer !== undefined) return;
+    this.twinFlushTimer = globalThis.setTimeout(() => this.flushPendingTwinMessages(), TWIN_UPDATE_MINIMUM_INTERVAL_MILLIS);
+  }
 
-    this.lastTwinProcessedAt.set(topic, now);
-    return true;
+  private flushPendingTwinMessages(): void {
+    this.twinFlushTimer = undefined;
+    const messages = Array.from(this.pendingTwinMessages.values());
+    this.pendingTwinMessages.clear();
+    messages.forEach((body) => dispatchTwinMessage(JSON.parse(body)));
+  }
+
+  private clearPendingTwinMessages(): void {
+    if (this.twinFlushTimer !== undefined) globalThis.clearTimeout(this.twinFlushTimer);
+    this.twinFlushTimer = undefined;
+    this.pendingTwinMessages.clear();
   }
 }
 

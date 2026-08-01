@@ -9,10 +9,12 @@ import {
   Paper,
   Stack,
   Tooltip,
+  TextField,
   Typography,
 } from '@mui/material';
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { telemetryLabel } from '../services/operationalState';
 import { useAppStore } from '../state/useAppStore';
 import { AttitudeIndicator } from './AttitudeIndicator';
 import { DroneDetailsDialog } from './DroneDetailsDialog';
@@ -26,6 +28,28 @@ export function DroneList({ onDetect }: DroneListProps) {
     useShallow((state) => Object.keys(state.drones)),
   );
   const [dialogDroneId, setDialogDroneId] = useState<string>();
+  const [search, setSearch] = useState('');
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = globalThis.setInterval(() => setNow(Date.now()), 1_000);
+    return () => globalThis.clearInterval(timer);
+  }, []);
+  const visibleDroneIds = useMemo(() => {
+    const state = useAppStore.getState();
+    const query = search.trim().toLowerCase();
+    return droneIds
+      .filter((id) => {
+        const drone = state.drones[id];
+        return !query || id.toLowerCase().includes(query) || drone?.name.toLowerCase().includes(query) || drone?.twin?.callSign?.toLowerCase().includes(query);
+      })
+      .sort((leftId, rightId) => {
+        const left = state.drones[leftId];
+        const right = state.drones[rightId];
+        const leftPriority = left?.stale ? 1 : left?.activeTaskId ? 0 : 2;
+        const rightPriority = right?.stale ? 1 : right?.activeTaskId ? 0 : 2;
+        return leftPriority - rightPriority || (left?.name ?? leftId).localeCompare(right?.name ?? rightId);
+      });
+  }, [droneIds, search, now]);
   const dialogDrone = useAppStore((state) => (
     dialogDroneId ? state.drones[dialogDroneId] : undefined
   ));
@@ -37,16 +61,18 @@ export function DroneList({ onDetect }: DroneListProps) {
     <>
       <Paper square sx={{ height: '100%', overflow: 'auto' }}>
         <Box sx={{ px: 2, py: 1.5 }}>
-          <Typography variant="overline">Drones</Typography>
+          <Typography variant="overline">Vehicles</Typography>
+          <TextField size="small" fullWidth placeholder="Search name, UUID or call sign" value={search} onChange={(event) => setSearch(event.target.value)} sx={{ mt: 1 }} />
         </Box>
 
         <List disablePadding>
-          {droneIds.map((droneId) => (
+          {visibleDroneIds.map((droneId) => (
             <DroneListItem
               key={droneId}
               droneId={droneId}
               onShowDetails={showDetails}
               onDetect={onDetect}
+              now={now}
             />
           ))}
         </List>
@@ -65,12 +91,14 @@ interface DroneListItemProps {
   droneId: string;
   onShowDetails: (droneId: string) => void;
   onDetect: (droneId: string) => Promise<void>;
+  now: number;
 }
 
 const DroneListItem = memo(function DroneListItem({
   droneId,
   onShowDetails,
   onDetect,
+  now,
 }: DroneListItemProps) {
   const row = useAppStore(useShallow((state) => {
     const drone = state.drones[droneId];
@@ -80,7 +108,9 @@ const DroneListItem = memo(function DroneListItem({
       id: drone.id,
       name: drone.name,
       symbolSet: drone.symbolSet,
-      hasPosition: drone.position !== undefined,
+      position: drone.position,
+      lastSeen: drone.lastSeen,
+      stale: drone.stale,
       systemId: drone.twin?.systemId,
       streamStatus: drone.mavlinkStreamStatus?.status,
       hasStreamStatus: drone.mavlinkStreamStatus !== undefined,
@@ -97,12 +127,13 @@ const DroneListItem = memo(function DroneListItem({
 
   const rowId = row.id;
   const rowName = row.name;
+  const liveState = telemetryLabel(row, now);
   const detectDisabled = detecting || !row.connected || row.systemId === undefined;
   const detectTooltip = row.systemId === undefined
     ? 'MAVLink system ID unavailable'
     : !row.connected
       ? 'Broker is disconnected'
-      : 'Publish the detect MAVLink event';
+      : 'Publish the five-second MAVLink detection assertion';
 
   async function detect(): Promise<void> {
     setDetecting(true);
@@ -146,7 +177,7 @@ const DroneListItem = memo(function DroneListItem({
         <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" sx={{ mt: 0.75 }}>
           {row.activeTaskLabel && <Chip size="small" color="primary" label={row.activeTaskLabel} />}
           {row.symbolSet && <Chip size="small" label={shortEnum(row.symbolSet)} />}
-          <Chip size="small" label={row.hasPosition ? 'LIVE' : 'KNOWN'} color={row.hasPosition ? 'success' : 'default'} />
+          <Chip size="small" label={liveState} color={liveState === 'LIVE' ? 'success' : liveState === 'STALE' ? 'warning' : 'default'} />
           <Chip
             size="small"
             label={streamStatusLabel(row.streamStatus)}
@@ -167,7 +198,7 @@ const DroneListItem = memo(function DroneListItem({
               }}
               sx={{ mt: 0.75 }}
             >
-              {detecting ? 'Detecting…' : 'Detect'}
+              {detecting ? 'Asserting…' : 'Assert detect'}
             </Button>
           </span>
         </Tooltip>

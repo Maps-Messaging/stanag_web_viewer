@@ -27,7 +27,34 @@ html, body, #root {
 .map-panel { grid-area: map; min-width: 0; min-height: 0; }
 .task-panel { grid-area: task; min-height: 0; }
 .event-log { grid-area: events; min-height: 0; }
+.map-wrapper { position: relative; width: 100%; height: 100%; }
 .map-container { width: 100%; height: 100%; }
+
+.map-toolbar,
+.map-legend {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 6px;
+  background: rgb(23 33 43 / 92%);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 35%);
+}
+
+.map-toolbar { top: 10px; left: 10px; padding: 6px; }
+.map-toolbar button { border: 1px solid rgb(255 255 255 / 25%); border-radius: 4px; background: #17212b; color: #fff; padding: 5px 8px; cursor: pointer; }
+.map-toolbar button[data-active="true"] { background: #1565c0; }
+.map-legend { right: 10px; bottom: 28px; flex-direction: column; padding: 8px 10px; font-size: 12px; }
+.map-legend span { display: flex; align-items: center; gap: 7px; }
+.map-legend i { width: 16px; height: 4px; border-radius: 2px; background: #42a5f5; }
+.map-legend i[data-kind="detection"] { height: 10px; border-radius: 50%; background: #8e24aa; }
+.map-legend i[data-kind="waypoint"] { height: 10px; border-radius: 50%; background: #42a5f5; }
+.map-legend i[data-kind="current-task"] { background: #ffb300; }
+.map-legend i[data-kind="previous-task"] { background: #78909c; }
+.map-legend i[data-kind="movement"] { background: #00c853; }
+.map-legend i[data-kind="immediate"] { background: #d50000; }
+.map-legend i[data-kind="predicted"] { background: #ff9800; }
 
 .drone-marker {
   width: 34px;
@@ -40,6 +67,11 @@ html, body, #root {
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
+
+.drone-marker[data-stale="true"] { opacity: 0.48; filter: grayscale(0.7); }
+.drone-marker[data-domain="ground"] { border-radius: 5px; }
+.drone-marker[data-domain="surface"] { border-radius: 4px 16px 16px 4px; }
+.drone-marker[data-domain="subsurface"] { border-style: double; }
 
 .drone-marker[data-selected="true"] {
   background: #ffb300;

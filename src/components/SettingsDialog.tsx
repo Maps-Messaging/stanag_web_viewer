@@ -1,4 +1,4 @@
-import { Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TextField } from '@mui/material';
+import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TextField } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { BrokerConfiguration } from '../models/types';
 import { defaultBrokerUrl, isDefaultBrokerUrl } from '../services/brokerDefaults';
@@ -14,9 +14,11 @@ export function SettingsDialog({ open, onClose, onApply }: Props) {
   const current = useAppStore((state) => state.configuration);
   const [configuration, setConfiguration] = useState(current);
   const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string>();
 
   useEffect(() => {
     setConfiguration(current);
+    setApplyError(undefined);
   }, [current, open]);
 
   function change<K extends keyof BrokerConfiguration>(field: K, value: BrokerConfiguration[K]): void {
@@ -35,9 +37,11 @@ export function SettingsDialog({ open, onClose, onApply }: Props) {
 
   async function apply(): Promise<void> {
     setApplying(true);
+    setApplyError(undefined);
     try {
       await onApply(configuration);
-      onClose();
+    } catch (error) {
+      setApplyError(String(error));
     } finally {
       setApplying(false);
     }
@@ -48,6 +52,7 @@ export function SettingsDialog({ open, onClose, onApply }: Props) {
       <DialogTitle>Connection settings</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
+          {applyError && <Alert severity="error">{applyError}</Alert>}
           <TextField
             select
             label="Transport"
@@ -69,10 +74,25 @@ export function SettingsDialog({ open, onClose, onApply }: Props) {
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={applying}>Close</Button>
-        <Button variant="contained" onClick={apply} disabled={applying || configuration.brokerUrl.trim().length === 0 || configuration.taskAdminTopic.trim().length === 0 || configuration.sourceUuid.trim().length === 0}>
+        <Button variant="contained" onClick={apply} disabled={applying || Boolean(configurationError(configuration))}>
           {applying ? 'Connecting…' : 'Apply and reconnect'}
         </Button>
       </DialogActions>
     </Dialog>
   );
+}
+
+
+function configurationError(configuration: BrokerConfiguration): string | undefined {
+  try {
+    const url = new URL(configuration.brokerUrl);
+    if (url.protocol !== 'ws:' && url.protocol !== 'wss:') return 'Broker URL must use ws:// or wss://.';
+  } catch {
+    return 'Broker WebSocket URL is invalid.';
+  }
+  if (!configuration.taskAdminTopic.trim()) return 'TASK_ADMIN destination is required.';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(configuration.sourceUuid.trim())) {
+    return 'Command source UUID is invalid.';
+  }
+  return undefined;
 }

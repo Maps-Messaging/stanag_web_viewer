@@ -644,15 +644,18 @@ export function parseTaskStatus(payload: unknown): ParsedTaskStatus {
 
 function mapTaskState(state: string): TaskState {
   switch (state) {
-    case 'TaskStateEnum_PENDING':
+    case 'TaskStateEnum_PENDING': return 'PENDING';
     case 'TaskStateEnum_ACCEPTED': return 'ACCEPTED';
-    case 'TaskStateEnum_ACTIVE': return 'EXECUTING';
+    case 'TaskStateEnum_ACTIVE': return 'ACTIVE';
     case 'TaskStateEnum_SUCCEEDED': return 'COMPLETED';
+    case 'TaskStateEnum_PREEMPTING': return 'PREEMPTING';
+    case 'TaskStateEnum_PREEMPTED': return 'PREEMPTED';
     case 'TaskStateEnum_CANCELLED':
     case 'TaskStateEnum_CANCELED': return 'CANCELLED';
     case 'TaskStateEnum_REJECTED': return 'REJECTED';
-    case 'TaskStateEnum_FAILED':
-    case 'TaskStateEnum_ABORTED': return 'FAILED';
+    case 'TaskStateEnum_FAILED': return 'FAILED';
+    case 'TaskStateEnum_ABORTED': return 'ABORTED';
+    case 'TaskStateEnum_LOST': return 'LOST';
     default: throw new Error(`Unsupported STANAG task state: ${state}`);
   }
 }
