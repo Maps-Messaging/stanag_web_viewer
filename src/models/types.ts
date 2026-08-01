@@ -54,7 +54,7 @@ export interface Drone {
   standardIdentity?: string; symbolSet?: string; entityStatus?: string; entity?: string; entityType?: string; entitySubtype?: string;
   sector1?: string; sector2?: string; position?: GeoPoint; heading: number; roll?: number; pitch?: number; yaw?: number;
   groundSpeed: number; course?: number; climbRate?: number; capabilities: DroneCapability[]; stateTimestamp?: number;
-  validUntil?: number; initiatedAt?: number; lastSeen: number; activeTaskId?: string; twin?: TwinState;
+  validUntil?: number; initiatedAt?: number; lastSeen: number; stale?: boolean; activeTaskId?: string; twin?: TwinState;
   mavlinkStreamStatus?: MavlinkStreamStatus;
 }
 

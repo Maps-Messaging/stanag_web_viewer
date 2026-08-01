@@ -1,7 +1,11 @@
 import type { DroneTask, DroneTelemetryUpdate, GeoPoint, MavlinkSequenceStatus, MavlinkStreamStatus, TwinState } from '../models/types';
 import { parseDynamicTrack } from '../services/dynamicUpdateAdapter';
-import { getStanagMessageType, parseNodeMessage, parseTaskAdmin, parseTaskStatus } from '../services/stanagAdapter';
+import { mergePercentComplete, shouldApplyTaskState } from '../services/operationalState';
+import { getStanagMessageType, parseNodeMessage, parseTaskAdmin, parseTaskStatus, type ParsedTaskStatus } from '../services/stanagAdapter';
 import { useAppStore } from '../state/useAppStore';
+
+const PENDING_TASK_STATUS_TTL_MILLIS = 30_000;
+const pendingTaskStatuses = new Map<string, { status: ParsedTaskStatus; expiresAt: number }>();
 
 export function dispatchStanagMessage(payload: unknown): void {
   try {
@@ -82,6 +86,11 @@ function dispatchTaskAdmin(payload: unknown): void {
 
   if (admin.action === 'PUSH' && admin.task) {
     store.upsertTask(withDisplayFields(admin.task));
+    const pending = pendingTaskStatuses.get(admin.taskId);
+    if (pending && pending.expiresAt > Date.now() && pending.status.droneId === admin.droneId) {
+      pendingTaskStatuses.delete(admin.taskId);
+      applyTaskStatus(pending.status, payload);
+    }
     store.addEvent({
       level: 'INFO',
       message: `TASK_ADMIN PUSH: ${admin.task.type} ${admin.taskId}`,
@@ -109,14 +118,25 @@ function dispatchTaskAdmin(payload: unknown): void {
 }
 
 function dispatchTaskStatus(payload: unknown): void {
-  const store = useAppStore.getState();
   const status = parseTaskStatus(payload);
-  const existing = store.tasks[status.taskId];
-
+  const existing = useAppStore.getState().tasks[status.taskId];
   if (!existing) {
-    store.addEvent({ level: 'WARN', message: `${status.messageType} received for unknown task ${status.taskId}`, payload });
+    purgePendingTaskStatuses();
+    pendingTaskStatuses.set(status.taskId, { status, expiresAt: Date.now() + PENDING_TASK_STATUS_TTL_MILLIS });
+    useAppStore.getState().addEvent({
+      level: 'INFO',
+      message: `${status.messageType} buffered pending TASK_ADMIN for ${status.taskId}`,
+      payload,
+    });
     return;
   }
+  applyTaskStatus(status, payload);
+}
+
+function applyTaskStatus(status: ParsedTaskStatus, payload: unknown): void {
+  const store = useAppStore.getState();
+  const existing = store.tasks[status.taskId];
+  if (!existing) return;
   if (existing.droneId !== status.droneId) {
     store.addEvent({
       level: 'ERROR',
@@ -125,13 +145,21 @@ function dispatchTaskStatus(payload: unknown): void {
     });
     return;
   }
+  if (!shouldApplyTaskState(existing.state, status.state)) {
+    store.addEvent({
+      level: 'WARN',
+      message: `${status.messageType} ignored state regression for ${status.taskId}: ${existing.state} to ${status.state}`,
+      payload,
+    });
+    return;
+  }
 
   store.upsertTask({
     ...existing,
     state: status.state,
-    percentComplete: status.percentComplete ?? existing.percentComplete,
+    percentComplete: mergePercentComplete(existing.percentComplete, status.percentComplete),
     updatedAt: Date.now(),
-    message: status.message,
+    message: status.message ?? existing.message,
   });
 
   store.addEvent({
@@ -140,6 +168,13 @@ function dispatchTaskStatus(payload: unknown): void {
       status.percentComplete === undefined ? '' : ` ${status.percentComplete.toFixed(1)}%`
     }${status.message ? `: ${status.message}` : ''}`,
     payload,
+  });
+}
+
+function purgePendingTaskStatuses(): void {
+  const now = Date.now();
+  pendingTaskStatuses.forEach((pending, taskId) => {
+    if (pending.expiresAt <= now) pendingTaskStatuses.delete(taskId);
   });
 }
 

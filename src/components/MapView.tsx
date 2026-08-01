@@ -1,7 +1,9 @@
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
 import type { Detection, Drone, DroneTask, GeoPoint, TaskGeometry } from '../models/types';
 import {
+  hasImmediateCollisionRisk,
+  mobilityDomain,
   predictCollisions,
   type CollisionPredictionConfiguration,
   type PredictedCollision,
@@ -54,6 +56,9 @@ export function MapView() {
   const markersRef = useRef<globalThis.Map<string, maplibregl.Marker>>(new globalThis.Map());
   const tracksRef = useRef<globalThis.Map<string, GeoPoint[]>>(new globalThis.Map());
   const taskPopupRef = useRef<maplibregl.Popup | null>(null);
+  const followSelectedRef = useRef(false);
+  const initialFitDoneRef = useRef(false);
+  const [followSelected, setFollowSelected] = useState(false);
   const tasks = useAppStore((state) => state.tasks);
   const taskType = useAppStore((state) => state.taskType);
   const draftPoints = useAppStore((state) => state.draftPoints);
@@ -81,14 +86,11 @@ export function MapView() {
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }), 'bottom-left');
-
-    const detectionExpiryTimer = globalThis.setInterval(() => {
-      const state = useAppStore.getState();
-      const now = Date.now();
-      Object.values(state.detections).forEach((detection) => {
-        if (detection.validUntil !== undefined && detection.validUntil <= now) state.removeDetection(detection.id);
-      });
-    }, 1_000);
+    map.on('dragstart', () => {
+      if (!followSelectedRef.current) return;
+      followSelectedRef.current = false;
+      setFollowSelected(false);
+    });
 
     let mapLoaded = false;
     let droneRenderFrame: number | undefined;
@@ -106,6 +108,13 @@ export function MapView() {
         pendingDroneIds.clear();
 
         updateDroneMarkers(map, state.drones, state.selectedDroneId, changedDroneIds, markersRef.current, tracksRef.current);
+        if (!initialFitDoneRef.current) {
+          initialFitDoneRef.current = fitVehicles(map, Object.values(state.drones));
+        }
+        if (followSelectedRef.current && state.selectedDroneId) {
+          const selected = state.drones[state.selectedDroneId];
+          if (selected?.position) map.easeTo({ center: [selected.position.longitude, selected.position.latitude], duration: 250 });
+        }
 
         if (droneSourcesDirty) {
           droneSourcesDirty = false;
@@ -126,9 +135,13 @@ export function MapView() {
       if (state.drones !== previous.drones) {
         const droneIds = new Set([...Object.keys(state.drones), ...Object.keys(previous.drones)]);
         droneIds.forEach((droneId) => {
-          if (state.drones[droneId] !== previous.drones[droneId]) pendingDroneIds.add(droneId);
+          const currentDrone = state.drones[droneId];
+          const previousDrone = previous.drones[droneId];
+          if (currentDrone !== previousDrone) {
+            pendingDroneIds.add(droneId);
+            if (droneMotionChanged(currentDrone, previousDrone)) droneSourcesDirty = true;
+          }
         });
-        droneSourcesDirty = true;
       }
 
       if (state.detections !== previous.detections) detectionSourceDirty = true;
@@ -167,7 +180,6 @@ export function MapView() {
 
     return () => {
       unsubscribe();
-      globalThis.clearInterval(detectionExpiryTimer);
       if (droneRenderFrame !== undefined) globalThis.cancelAnimationFrame(droneRenderFrame);
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current.clear();
@@ -186,7 +198,60 @@ export function MapView() {
     if (map.isStyleLoaded()) update(); else map.once('load', update);
   }, [draftPoints, taskType, tasks]);
 
-  return <div ref={containerRef} className="map-container" />;
+  function showFleet(): void {
+    const map = mapRef.current;
+    if (map) fitVehicles(map, Object.values(useAppStore.getState().drones), true);
+  }
+
+  function centreSelected(): void {
+    const map = mapRef.current;
+    const state = useAppStore.getState();
+    const selected = state.selectedDroneId ? state.drones[state.selectedDroneId] : undefined;
+    if (map && selected?.position) map.easeTo({ center: [selected.position.longitude, selected.position.latitude], zoom: Math.max(map.getZoom(), 14) });
+  }
+
+  function toggleFollow(): void {
+    const next = !followSelectedRef.current;
+    followSelectedRef.current = next;
+    setFollowSelected(next);
+    if (next) centreSelected();
+  }
+
+  return (
+    <div className="map-wrapper">
+      <div ref={containerRef} className="map-container" />
+      <div className="map-toolbar" aria-label="Map navigation">
+        <button type="button" onClick={showFleet}>Fit vehicles</button>
+        <button type="button" onClick={centreSelected}>Centre selected</button>
+        <button type="button" data-active={followSelected} onClick={toggleFollow}>Follow selected</button>
+      </div>
+      <div className="map-legend">
+        <strong>Map</strong>
+        <span><i data-kind="vehicle" />Vehicle</span>
+        <span><i data-kind="detection" />Detection</span>
+        <span><i data-kind="waypoint" />Waypoint</span>
+        <span><i data-kind="current-task" />Current task</span>
+        <span><i data-kind="previous-task" />Previous task</span>
+        <span><i data-kind="movement" />Movement</span>
+        <span><i data-kind="immediate" />Immediate conflict</span>
+        <span><i data-kind="predicted" />Predicted conflict</span>
+      </div>
+    </div>
+  );
+}
+
+function droneMotionChanged(current: Drone | undefined, previous: Drone | undefined): boolean {
+  if (!current || !previous) return current !== previous;
+  return current.position?.latitude !== previous.position?.latitude
+    || current.position?.longitude !== previous.position?.longitude
+    || current.position?.altitude !== previous.position?.altitude
+    || current.heading !== previous.heading
+    || current.course !== previous.course
+    || current.groundSpeed !== previous.groundSpeed
+    || current.climbRate !== previous.climbRate
+    || current.stale !== previous.stale
+    || current.symbolSet !== previous.symbolSet
+    || current.twin?.vehicleClass !== previous.twin?.vehicleClass;
 }
 
 function registerPopupLayer(map: MapLibreMap, layer: string, popupRef: MutableRefObject<maplibregl.Popup | null>, fallbackTitle: string): void {
@@ -332,7 +397,7 @@ function updateCollisionSources(map: MapLibreMap, drones: Drone[]): void {
   const immediateSource = map.getSource(COLLISION_WARNING_SOURCE) as GeoJSONSource | undefined;
   const predictedDroneSource = map.getSource(PREDICTED_COLLISION_DRONE_SOURCE) as GeoJSONSource | undefined;
   const predictedPointSource = map.getSource(PREDICTED_COLLISION_POINT_SOURCE) as GeoJSONSource | undefined;
-  const positioned = drones.filter((drone): drone is Drone & { position: GeoPoint } => Boolean(drone.position));
+  const positioned = drones.filter((drone): drone is Drone & { position: GeoPoint } => Boolean(drone.position) && !drone.stale);
   const immediateConflicts = new Map<string, { drone: Drone & { position: GeoPoint }; nearestName: string; nearestDistance: number }>();
 
   for (let leftIndex = 0; leftIndex < positioned.length; leftIndex += 1) {
@@ -341,6 +406,7 @@ function updateCollisionSources(map: MapLibreMap, drones: Drone[]): void {
       const right = positioned[rightIndex];
       const distance = distanceMeters(left.position, right.position);
       if (distance > COLLISION_WARNING_DISTANCE_METERS) continue;
+      if (!hasImmediateCollisionRisk(left, right, COLLISION_PREDICTION_CONFIGURATION)) continue;
       recordConflict(immediateConflicts, left, right.name, distance);
       recordConflict(immediateConflicts, right, left.name, distance);
     }
@@ -429,6 +495,8 @@ function updateDroneMarkers(map: MapLibreMap, drones: Record<string, Drone>, sel
       existing.setLngLat([drone.position.longitude, drone.position.latitude]);
       existing.setRotation(drone.heading);
       existing.getElement().dataset.selected = String(droneId === selectedDroneId);
+      existing.getElement().dataset.stale = String(Boolean(drone.stale));
+      existing.getElement().dataset.domain = mobilityDomain(drone).toLowerCase();
       existing.getElement().title = drone.name;
       continue;
     }
@@ -437,6 +505,8 @@ function updateDroneMarkers(map: MapLibreMap, drones: Record<string, Drone>, sel
     element.type = 'button';
     element.title = drone.name;
     element.dataset.selected = String(droneId === selectedDroneId);
+    element.dataset.stale = String(Boolean(drone.stale));
+    element.dataset.domain = mobilityDomain(drone).toLowerCase();
     element.innerHTML = '▲';
     element.addEventListener('click', (event) => { event.stopPropagation(); useAppStore.getState().selectDrone(droneId); });
     markers.set(droneId, new maplibregl.Marker({ element, rotationAlignment: 'map', rotation: drone.heading }).setLngLat([drone.position.longitude, drone.position.latitude]).addTo(map));
@@ -460,7 +530,7 @@ function updateDroneTrackSource(map: MapLibreMap, tracks: globalThis.Map<string,
 function updateDroneMovementSource(map: MapLibreMap, drones: Drone[]): void {
   const source = map.getSource(DRONE_MOVEMENT_SOURCE) as GeoJSONSource | undefined;
   const features = drones.flatMap((drone): GeoJSON.Feature<GeoJSON.LineString>[] => {
-    if (!drone.position || drone.groundSpeed < MIN_VISIBLE_SPEED_METRES_PER_SECOND) return [];
+    if (!drone.position || drone.stale || drone.groundSpeed < MIN_VISIBLE_SPEED_METRES_PER_SECOND) return [];
     const distance = Math.min(MAX_MOVEMENT_LINE_METRES, Math.max(MIN_MOVEMENT_LINE_METRES, drone.groundSpeed * MOVEMENT_LINE_METRES_PER_METRE_PER_SECOND));
     return [lineFeature([drone.position, destinationPoint(drone.position, drone.course ?? drone.heading, distance)], { droneId: drone.id })];
   });
@@ -600,11 +670,55 @@ function showPropertiesPopup(map: MapLibreMap, lngLat: maplibregl.LngLat, proper
   Object.entries(properties).forEach(([key, value]) => {
     if (value === undefined || value === null || key === 'kind' || key === 'label' || key === 'name') return;
     const row = table.insertRow();
-    row.insertCell().textContent = key;
-    row.insertCell().textContent = String(value);
+    row.insertCell().textContent = popupLabel(key);
+    row.insertCell().textContent = popupValue(key, value);
   });
   root.appendChild(table);
   popupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '360px' }).setLngLat(lngLat).setDOMContent(root).addTo(map);
+}
+
+function popupLabel(key: string): string {
+  const labels: Record<string, string> = {
+    taskId: 'Task ID', droneId: 'Vehicle ID', taskType: 'Task', state: 'State', duration: 'Duration',
+    percentComplete: 'Complete', updatedAt: 'Updated', radiusMeters: 'Radius', widthMeters: 'Width',
+    nearestDrone: 'Nearest vehicle', nearestDistanceMeters: 'Distance', thresholdMeters: 'Threshold',
+    timeToClosestApproachSeconds: 'Closest approach in', horizontalSeparationMeters: 'Horizontal separation',
+    verticalSeparationMeters: 'Vertical separation', lookAheadSeconds: 'Look-ahead', sourceId: 'Source',
+    symbolSet: 'Symbol set', trackPhase: 'Track phase', validUntil: 'Valid until', rtspUrl: 'Video URL',
+    latitude: 'Latitude', longitude: 'Longitude', altitude: 'Altitude', pointIndex: 'Waypoint', priority: 'Priority',
+  };
+  return labels[key] ?? key.replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ');
+}
+
+function popupValue(key: string, value: unknown): string {
+  if (typeof value === 'number') {
+    if (key.endsWith('Meters') || key === 'radiusMeters' || key === 'widthMeters') return `${value} m`;
+    if (key.endsWith('Seconds')) return `${value} s`;
+    if (key === 'percentComplete') return `${value}%`;
+  }
+  if (key === 'duration' && typeof value === 'string') return humanDuration(value);
+  return String(value);
+}
+
+function humanDuration(value: string): string {
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(value);
+  if (!match) return value;
+  const parts = [match[1] && `${match[1]} h`, match[2] && `${match[2]} min`, match[3] && `${match[3]} s`].filter(Boolean);
+  return parts.join(' ') || '0 s';
+}
+
+function fitVehicles(map: MapLibreMap, drones: Drone[], force = false): boolean {
+  const positioned = drones.filter((drone): drone is Drone & { position: GeoPoint } => Boolean(drone.position));
+  if (positioned.length === 0) return false;
+  if (positioned.length === 1) {
+    const point = positioned[0].position;
+    map.easeTo({ center: [point.longitude, point.latitude], zoom: force ? 14 : map.getZoom() });
+    return true;
+  }
+  const bounds = new maplibregl.LngLatBounds();
+  positioned.forEach((drone) => bounds.extend([drone.position.longitude, drone.position.latitude]));
+  map.fitBounds(bounds, { padding: 60, maxZoom: 15, duration: force ? 500 : 0 });
+  return true;
 }
 
 function positiveNumber(value: unknown, fallback: number): number {

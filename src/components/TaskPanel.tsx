@@ -1,11 +1,13 @@
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import UndoIcon from '@mui/icons-material/Undo';
 import SendIcon from '@mui/icons-material/Send';
 import { Alert, Box, Button, Divider, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { DroneTask, GeoPoint, TaskDuration, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
 import type { MessageTransport } from '../messaging/transport';
+import { CANCELLABLE_TASK_STATES, taskSeverity } from '../services/operationalState';
 import { supportsDuration, validateTaskDuration } from '../services/taskDuration';
 import { createUuid } from '../services/uuid';
 import { useAppStore } from '../state/useAppStore';
@@ -50,6 +52,7 @@ export function TaskPanel({ transport }: Props) {
   });
   const selectTaskType = useAppStore((state) => state.selectTaskType);
   const clearDraftPoints = useAppStore((state) => state.clearDraftPoints);
+  const undoDraftPoint = useAppStore((state) => state.undoDraftPoint);
   const addEvent = useAppStore((state) => state.addEvent);
   const [geometryType, setGeometryType] = useState<TaskGeometryType>('POINT');
   const [altitude, setAltitude] = useState(100);
@@ -58,6 +61,12 @@ export function TaskPanel({ transport }: Props) {
   const [durationHours, setDurationHours] = useState('0');
   const [durationMinutes, setDurationMinutes] = useState('0');
   const [durationSeconds, setDurationSeconds] = useState('0');
+  const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    resetDuration();
+  }, [selectedDroneId]);
 
   const supportedTaskTypes = useMemo(() => {
     if (!selectedDrone) return [];
@@ -92,6 +101,7 @@ export function TaskPanel({ transport }: Props) {
       && transport
       && effectiveGeometryType
       && !geometryError
+      && !submitting
       && (!supportsDuration(taskType) || !durationError),
   );
 
@@ -100,6 +110,13 @@ export function TaskPanel({ transport }: Props) {
     selectTaskType(type);
     setGeometryType(defaultGeometry);
     clearDraftPoints();
+    resetDuration();
+  }
+
+  function resetDuration(): void {
+    setDurationHours('0');
+    setDurationMinutes('0');
+    setDurationSeconds('0');
   }
 
   async function submit(): Promise<void> {
@@ -126,22 +143,29 @@ export function TaskPanel({ transport }: Props) {
       updatedAt: Date.now(),
     };
 
+    setSubmitting(true);
     try {
       await transport.publishTask(task);
       clearDraftPoints();
+      resetDuration();
       addEvent({ level: 'INFO', message: `Published ${task.type} task ${task.id}; awaiting TASK_ADMIN`, payload: task });
     } catch (error) {
       addEvent({ level: 'ERROR', message: `Task submission failed: ${String(error)}`, payload: task });
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function cancel(): Promise<void> {
     if (!latestTask || !transport) return;
+    setCancelling(true);
     try {
       await transport.cancelTask(latestTask);
       addEvent({ level: 'INFO', message: `Published cancellation for task ${latestTask.id}; awaiting TASK_ADMIN` });
     } catch (error) {
       addEvent({ level: 'ERROR', message: `Task cancellation failed: ${String(error)}` });
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -225,8 +249,9 @@ export function TaskPanel({ transport }: Props) {
 
         {taskType && (
           <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button fullWidth startIcon={<DeleteSweepIcon />} onClick={clearDraftPoints}>Clear</Button>
-            <Button fullWidth variant="contained" startIcon={<SendIcon />} disabled={!canSubmit} onClick={submit}>Submit</Button>
+            <Button startIcon={<UndoIcon />} onClick={undoDraftPoint} disabled={draftPoints.length === 0}>Undo</Button>
+            <Button startIcon={<DeleteSweepIcon />} onClick={clearDraftPoints} disabled={draftPoints.length === 0}>Clear</Button>
+            <Button fullWidth variant="contained" startIcon={<SendIcon />} disabled={!canSubmit} onClick={submit}>{submitting ? 'Publishing…' : 'Submit'}</Button>
           </Box>
         )}
       </Stack>
@@ -244,7 +269,7 @@ export function TaskPanel({ transport }: Props) {
               <Typography variant="caption" color="text.secondary">{latestTask.percentComplete.toFixed(1)}% complete</Typography>
             </Stack>
           )}
-          <Button color="error" variant="outlined" startIcon={<CancelIcon />} disabled={!['SUBMITTED', 'ACCEPTED', 'EXECUTING'].includes(latestTask.state)} onClick={cancel}>Cancel task</Button>
+          <Button color="error" variant="outlined" startIcon={<CancelIcon />} disabled={cancelling || !CANCELLABLE_TASK_STATES.has(latestTask.state)} onClick={cancel}>{cancelling ? 'Cancelling…' : 'Cancel task'}</Button>
         </Stack>
       ) : <Typography variant="body2" color="text.secondary">No task for this drone.</Typography>}
     </Paper>
@@ -366,9 +391,3 @@ function geometryLabel(type: TaskGeometryType): string {
   return type.charAt(0) + type.slice(1).toLowerCase();
 }
 
-function taskSeverity(state: DroneTask['state']): 'success' | 'info' | 'warning' | 'error' {
-  if (state === 'COMPLETED') return 'success';
-  if (state === 'FAILED' || state === 'REJECTED') return 'error';
-  if (state === 'CANCEL_REQUESTED' || state === 'CANCELLED') return 'warning';
-  return 'info';
-}

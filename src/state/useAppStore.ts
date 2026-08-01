@@ -38,7 +38,9 @@ interface AppState {
   selectDetection: (detectionId?: string) => void;
   selectTaskType: (taskType?: TaskType) => void;
   addDraftPoint: (point: GeoPoint) => void;
+  undoDraftPoint: () => void;
   clearDraftPoints: () => void;
+  refreshTelemetryFreshness: (now: number, staleAfterMillis: number) => void;
   setConnection: (connected: boolean, message: string) => void;
   updateConfiguration: (configuration: BrokerConfiguration) => void;
 }
@@ -99,6 +101,7 @@ export const useAppStore = create<AppState>((set) => ({
             ...drone,
             position: drone.position ?? existing?.position,
             capabilities: drone.capabilities.length > 0 ? drone.capabilities : existing?.capabilities ?? [],
+            stale: false,
             activeTaskId: existing?.activeTaskId,
           },
         },
@@ -142,6 +145,7 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => {
       const existing = state.drones[droneId];
       if (!existing) return state;
+      if (telemetry.lastSeen !== undefined && telemetry.lastSeen < existing.lastSeen) return state;
 
       return {
         drones: {
@@ -149,6 +153,7 @@ export const useAppStore = create<AppState>((set) => ({
           [droneId]: {
             ...existing,
             ...telemetry,
+            stale: false,
             position: telemetry.position
               ? { ...existing.position, ...telemetry.position }
               : existing.position,
@@ -216,8 +221,7 @@ export const useAppStore = create<AppState>((set) => ({
   selectDrone: (selectedDroneId) =>
     set({ selectedDroneId, selectedDetectionId: undefined, draftPoints: [] }),
 
-  selectDetection: (selectedDetectionId) =>
-    set({ selectedDetectionId, selectedDroneId: undefined, draftPoints: [] }),
+  selectDetection: (selectedDetectionId) => set({ selectedDetectionId }),
 
   selectTaskType: (taskType) =>
     set({ taskType, draftPoints: [] }),
@@ -225,7 +229,21 @@ export const useAppStore = create<AppState>((set) => ({
   addDraftPoint: (point) =>
     set((state) => ({ draftPoints: [...state.draftPoints, point] })),
 
+  undoDraftPoint: () =>
+    set((state) => ({ draftPoints: state.draftPoints.slice(0, -1) })),
+
   clearDraftPoints: () => set({ draftPoints: [] }),
+
+  refreshTelemetryFreshness: (now, staleAfterMillis) =>
+    set((state) => {
+      let changed = false;
+      const drones = Object.fromEntries(Object.entries(state.drones).map(([id, drone]) => {
+        const stale = now - drone.lastSeen > staleAfterMillis;
+        if (stale !== Boolean(drone.stale)) changed = true;
+        return [id, stale === Boolean(drone.stale) ? drone : { ...drone, stale }];
+      }));
+      return changed ? { drones } : state;
+    }),
 
   setConnection: (connected, connectionMessage) => set({ connected, connectionMessage }),
 

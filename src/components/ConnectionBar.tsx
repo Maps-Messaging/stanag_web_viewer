@@ -22,7 +22,7 @@ export function ConnectionBar({ onOpenSettings }: Props) {
         }}
       >
         <Typography variant="h6" sx={{ flexGrow: 1, minWidth: { xs: '100%', sm: 0 } }}>
-          STANAG Drone Demo
+          STANAG Vehicle Viewer
         </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <CircleIcon color={connected ? 'success' : 'error'} sx={{ fontSize: 14, flex: '0 0 auto' }} />
