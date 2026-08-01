@@ -177,7 +177,11 @@ const DroneListItem = memo(function DroneListItem({
         <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" sx={{ mt: 0.75 }}>
           {row.activeTaskLabel && <Chip size="small" color="primary" label={row.activeTaskLabel} />}
           {row.symbolSet && <Chip size="small" label={shortEnum(row.symbolSet)} />}
-          <Chip size="small" label={liveState} color={liveState === 'LIVE' ? 'success' : liveState === 'STALE' ? 'warning' : 'default'} />
+          <Chip
+          size="small"
+          label={liveState === 'KNOWN' ? liveState : `${liveState} ${formatAge(now - row.lastSeen)}`}
+          color={liveState === 'LIVE' ? 'success' : liveState === 'STALE' ? 'warning' : 'default'}
+        />
           <Chip
             size="small"
             label={streamStatusLabel(row.streamStatus)}
@@ -232,6 +236,13 @@ const DroneLiveTelemetry = memo(function DroneLiveTelemetry({ droneId }: { drone
     </div>
   );
 });
+
+function formatAge(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
+}
 
 function formatHeading(value: number): string {
   const heading = (value % 360 + 360) % 360;

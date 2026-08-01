@@ -86,7 +86,11 @@ export function MapView() {
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }), 'bottom-left');
-
+    map.on('dragstart', () => {
+      if (!followSelectedRef.current) return;
+      followSelectedRef.current = false;
+      setFollowSelected(false);
+    });
 
     let mapLoaded = false;
     let droneRenderFrame: number | undefined;
@@ -131,9 +135,13 @@ export function MapView() {
       if (state.drones !== previous.drones) {
         const droneIds = new Set([...Object.keys(state.drones), ...Object.keys(previous.drones)]);
         droneIds.forEach((droneId) => {
-          if (state.drones[droneId] !== previous.drones[droneId]) pendingDroneIds.add(droneId);
+          const currentDrone = state.drones[droneId];
+          const previousDrone = previous.drones[droneId];
+          if (currentDrone !== previousDrone) {
+            pendingDroneIds.add(droneId);
+            if (droneMotionChanged(currentDrone, previousDrone)) droneSourcesDirty = true;
+          }
         });
-        droneSourcesDirty = true;
       }
 
       if (state.detections !== previous.detections) detectionSourceDirty = true;
@@ -230,6 +238,20 @@ export function MapView() {
       </div>
     </div>
   );
+}
+
+function droneMotionChanged(current: Drone | undefined, previous: Drone | undefined): boolean {
+  if (!current || !previous) return current !== previous;
+  return current.position?.latitude !== previous.position?.latitude
+    || current.position?.longitude !== previous.position?.longitude
+    || current.position?.altitude !== previous.position?.altitude
+    || current.heading !== previous.heading
+    || current.course !== previous.course
+    || current.groundSpeed !== previous.groundSpeed
+    || current.climbRate !== previous.climbRate
+    || current.stale !== previous.stale
+    || current.symbolSet !== previous.symbolSet
+    || current.twin?.vehicleClass !== previous.twin?.vehicleClass;
 }
 
 function registerPopupLayer(map: MapLibreMap, layer: string, popupRef: MutableRefObject<maplibregl.Popup | null>, fallbackTitle: string): void {
