@@ -32,6 +32,7 @@ export default function App() {
   const updateConfiguration = useAppStore((state) => state.updateConfiguration);
   const addEvent = useAppStore((state) => state.addEvent);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [transport, setTransport] = useState<MessageTransport>();
   const transportRef = useRef<MessageTransport | undefined>(undefined);
   const connectionGenerationRef = useRef(0);
@@ -50,17 +51,12 @@ export default function App() {
       addEvent({ level: 'WARN', message: `Previous transport disconnect failed: ${String(error)}` });
     }
 
-    if (generation !== connectionGenerationRef.current) {
-      throw new Error('Connection attempt was superseded');
-    }
+    if (generation !== connectionGenerationRef.current) throw new Error('Connection attempt was superseded');
 
     let nextTransport: MessageTransport | undefined;
     try {
       nextTransport = await createTransport(nextConfiguration);
-
-      if (generation !== connectionGenerationRef.current) {
-        throw new Error('Connection attempt was superseded');
-      }
+      if (generation !== connectionGenerationRef.current) throw new Error('Connection attempt was superseded');
 
       await withTimeout(
         nextTransport.connect(),
@@ -145,21 +141,25 @@ export default function App() {
       <div className="app-shell">
         <ConnectionBar onOpenSettings={() => setSettingsOpen(true)} />
         <main className="workspace">
-          <aside className="drone-list"><DroneList onDetect={detectDrone} /></aside>
+          <aside className="drone-list">
+            <DroneList
+              onDetect={detectDrone}
+              onAddTask={() => setTaskDialogOpen(true)}
+              transport={transport}
+            />
+          </aside>
           <section className="map-panel"><MapView /></section>
-          <aside className="task-panel"><TaskPanel transport={transport} /></aside>
           <section className="event-log"><EventLog /></section>
         </main>
       </div>
+      <TaskPanel open={taskDialogOpen} onClose={() => setTaskDialogOpen(false)} transport={transport} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onApply={applySettings} />
     </ThemeProvider>
   );
 }
 
 function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => {
-    globalThis.setTimeout(resolve, milliseconds);
-  });
+  return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
 }
 
 function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
