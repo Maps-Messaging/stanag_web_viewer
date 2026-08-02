@@ -16,16 +16,15 @@ html, body, #root {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 360px;
+  grid-template-columns: 300px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) 180px;
   grid-template-areas:
-    "drones map task"
-    "events events task";
+    "drones map"
+    "events events";
 }
 
 .drone-list { grid-area: drones; min-height: 0; }
 .map-panel { grid-area: map; min-width: 0; min-height: 0; }
-.task-panel { grid-area: task; min-height: 0; }
 .event-log { grid-area: events; min-height: 0; }
 .map-wrapper { position: relative; width: 100%; height: 100%; }
 .map-container { width: 100%; height: 100%; }
@@ -121,24 +120,9 @@ html, body, #root {
   left: 0;
 }
 
-.attitude-indicator__sky {
-  top: 0;
-  bottom: 50%;
-  background: #1976d2;
-}
-
-.attitude-indicator__ground {
-  top: 50%;
-  bottom: 0;
-  background: #7b4f2c;
-}
-
-.attitude-indicator__horizon-line {
-  top: 50%;
-  height: 2px;
-  background: #fff;
-  transform: translateY(-1px);
-}
+.attitude-indicator__sky { top: 0; bottom: 50%; background: #1976d2; }
+.attitude-indicator__ground { top: 50%; bottom: 0; background: #7b4f2c; }
+.attitude-indicator__horizon-line { top: 50%; height: 2px; background: #fff; transform: translateY(-1px); }
 
 .attitude-indicator__aircraft {
   position: absolute;
@@ -202,160 +186,40 @@ html, body, #root {
   will-change: transform;
 }
 
-.event-log-entries {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+.event-log-entries { display: flex; flex-direction: column; gap: 4px; }
+.event-log-entry { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: baseline; gap: 8px; min-width: 0; }
+.event-log-entry__time { color: rgb(255 255 255 / 70%); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.event-log-entry__level { min-width: 44px; padding: 1px 6px; border: 1px solid rgb(255 255 255 / 22%); border-radius: 10px; font-size: 0.68rem; line-height: 1.5; text-align: center; }
+.event-log-entry__level--warn { border-color: #ed6c02; color: #ffb74d; }
+.event-log-entry__level--error { border-color: #d32f2f; color: #ef5350; }
+.event-log-entry__message { min-width: 0; overflow-wrap: anywhere; font-size: 0.875rem; }
 
-.event-log-entry {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
-.event-log-entry__time {
-  color: rgb(255 255 255 / 70%);
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.event-log-entry__level {
-  min-width: 44px;
-  padding: 1px 6px;
-  border: 1px solid rgb(255 255 255 / 22%);
-  border-radius: 10px;
-  font-size: 0.68rem;
-  line-height: 1.5;
-  text-align: center;
-}
-
-.event-log-entry__level--warn {
-  border-color: #ed6c02;
-  color: #ffb74d;
-}
-
-.event-log-entry__level--error {
-  border-color: #d32f2f;
-  color: #ef5350;
-}
-
-.event-log-entry__message {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: 0.875rem;
-}
-
-@media (max-width: 1100px) {
+@media (max-width: 900px) {
   .workspace {
-    grid-template-columns: 220px minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) 320px 160px;
-    grid-template-areas:
-      "drones map"
-      "task task"
-      "events events";
+    grid-template-columns: 240px minmax(0, 1fr);
   }
 }
 
 @media (max-width: 700px) {
-  html, body, #root {
-    min-height: 100%;
-    height: auto;
-    overflow: auto;
-  }
-
-  .app-shell {
-    min-height: 100vh;
-    height: auto;
-    grid-template-rows: auto auto;
-  }
-
+  html, body, #root { min-height: 100%; height: auto; overflow: auto; }
+  .app-shell { min-height: 100vh; height: auto; grid-template-rows: auto auto; }
   .workspace {
     min-height: auto;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 240px 50vh auto 180px;
+    grid-template-rows: 280px 55vh 180px;
     grid-template-areas:
       "drones"
       "map"
-      "task"
       "events";
   }
-
-  .drone-list,
-  .map-panel,
-  .task-panel,
-  .event-log {
-    min-width: 0;
-  }
+  .drone-list, .map-panel, .event-log { min-width: 0; }
 }
 
-.drone-popup {
-  min-width: 260px;
-  color: #111;
-  font-size: 13px;
-}
-
-.drone-popup > strong {
-  display: block;
-  margin-bottom: 2px;
-  font-size: 15px;
-}
-
-.drone-popup-description {
-  margin-bottom: 8px;
-  color: #555;
-}
-
-.drone-popup table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.drone-popup td {
-  padding: 2px 0;
-  vertical-align: top;
-}
-
-.drone-popup td:first-child {
-  padding-right: 12px;
-  color: #666;
-}
-
-.drone-popup td:last-child {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.task-popup {
-  min-width: 220px;
-  color: #111;
-  font-size: 13px;
-}
-
-.task-popup > strong {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 15px;
-}
-
-.task-popup table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.task-popup td {
-  padding: 2px 0;
-  vertical-align: top;
-}
-
-.task-popup td:first-child {
-  padding-right: 12px;
-  color: #666;
-}
-
-.task-popup td:last-child {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
+.drone-popup, .task-popup { min-width: 220px; color: #111; font-size: 13px; }
+.drone-popup { min-width: 260px; }
+.drone-popup > strong, .task-popup > strong { display: block; margin-bottom: 8px; font-size: 15px; }
+.drone-popup-description { margin-bottom: 8px; color: #555; }
+.drone-popup table, .task-popup table { width: 100%; border-collapse: collapse; }
+.drone-popup td, .task-popup td { padding: 2px 0; vertical-align: top; }
+.drone-popup td:first-child, .task-popup td:first-child { padding-right: 12px; color: #666; }
+.drone-popup td:last-child, .task-popup td:last-child { text-align: right; font-variant-numeric: tabular-nums; }

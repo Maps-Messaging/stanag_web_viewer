@@ -1,32 +1,35 @@
-import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
-import UndoIcon from '@mui/icons-material/Undo';
 import SendIcon from '@mui/icons-material/Send';
-import { Alert, Box, Button, Divider, LinearProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
+import UndoIcon from '@mui/icons-material/Undo';
+import {
+  Alert,
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  MenuItem,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import type { DroneTask, GeoPoint, TaskDuration, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
 import type { MessageTransport } from '../messaging/transport';
-import { CANCELLABLE_TASK_STATES, taskSeverity } from '../services/operationalState';
+import type { DroneTask, GeoPoint, TaskDuration, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
 import { supportsDuration, validateTaskDuration } from '../services/taskDuration';
 import { createUuid } from '../services/uuid';
 import { useAppStore } from '../state/useAppStore';
 
-interface Props { transport?: MessageTransport; }
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  transport?: MessageTransport;
+}
 
-const TASK_TYPES: TaskType[] = [
-  'REPOSITION',
-  'NAVIGATE',
-  'PATROL',
-  'LOITER',
-  'STANDBY',
-  'DETECT',
-  'SURVEY',
-  'SCREEN',
-];
-
+const TASK_TYPES: TaskType[] = ['REPOSITION', 'NAVIGATE', 'PATROL', 'LOITER', 'STANDBY', 'DETECT', 'SURVEY', 'SCREEN'];
 const VOLUME_TASK_GEOMETRIES: TaskGeometryType[] = ['CIRCLE', 'RECTANGLE', 'POLYGON', 'CORRIDOR'];
-
 const TASK_GEOMETRIES: Record<TaskType, TaskGeometryType[]> = {
   REPOSITION: ['POINT'],
   NAVIGATE: ['POINT', 'LINE'],
@@ -38,7 +41,7 @@ const TASK_GEOMETRIES: Record<TaskType, TaskGeometryType[]> = {
   SCREEN: VOLUME_TASK_GEOMETRIES,
 };
 
-export function TaskPanel({ transport }: Props) {
+export function TaskPanel({ open, onClose, transport }: Props) {
   const selectedDroneId = useAppStore((state) => state.selectedDroneId);
   const selectedDrone = useAppStore(useShallow((state) => {
     const drone = selectedDroneId ? state.drones[selectedDroneId] : undefined;
@@ -46,10 +49,6 @@ export function TaskPanel({ transport }: Props) {
   }));
   const taskType = useAppStore((state) => state.taskType);
   const draftPoints = useAppStore((state) => state.draftPoints);
-  const latestTask = useAppStore((state) => {
-    const taskId = selectedDroneId ? state.latestTaskIdByDrone[selectedDroneId] : undefined;
-    return taskId ? state.tasks[taskId] : undefined;
-  });
   const selectTaskType = useAppStore((state) => state.selectTaskType);
   const clearDraftPoints = useAppStore((state) => state.clearDraftPoints);
   const undoDraftPoint = useAppStore((state) => state.undoDraftPoint);
@@ -62,10 +61,11 @@ export function TaskPanel({ transport }: Props) {
   const [durationMinutes, setDurationMinutes] = useState('0');
   const [durationSeconds, setDurationSeconds] = useState('0');
   const [submitting, setSubmitting] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
-    resetDuration();
+    setDurationHours('0');
+    setDurationMinutes('0');
+    setDurationSeconds('0');
   }, [selectedDroneId]);
 
   const supportedTaskTypes = useMemo(() => {
@@ -84,39 +84,28 @@ export function TaskPanel({ transport }: Props) {
 
   const capability = selectedDrone?.capabilities.find((candidate) => normaliseTaskType(candidate.taskType) === taskType);
   const authorityGuid = capability?.authorities[0];
-  const taskGridColumns = getTaskGridColumnCount(supportedTaskTypes.length);
   const allowedGeometries = taskType ? TASK_GEOMETRIES[taskType] : [];
-  const effectiveGeometryType = taskType && allowedGeometries.includes(geometryType)
-    ? geometryType
-    : allowedGeometries[0];
+  const effectiveGeometryType = taskType && allowedGeometries.includes(geometryType) ? geometryType : allowedGeometries[0];
   const geometryError = effectiveGeometryType
     ? validateDraftGeometry(effectiveGeometryType, draftPoints.length, radius, corridorWidth)
     : 'Choose a supported task type.';
   const durationFieldErrors = durationErrors(durationHours, durationMinutes, durationSeconds);
   const durationError = Object.values(durationFieldErrors).find(Boolean);
   const canSubmit = Boolean(
-    selectedDrone
-      && taskType
-      && authorityGuid
-      && transport
-      && effectiveGeometryType
-      && !geometryError
-      && !submitting
+    selectedDrone && taskType && authorityGuid && transport && effectiveGeometryType && !geometryError && !submitting
       && (!supportsDuration(taskType) || !durationError),
   );
 
   function chooseTask(type: TaskType): void {
-    const defaultGeometry = TASK_GEOMETRIES[type][0];
     selectTaskType(type);
-    setGeometryType(defaultGeometry);
+    setGeometryType(TASK_GEOMETRIES[type][0]);
     clearDraftPoints();
-    resetDuration();
   }
 
-  function resetDuration(): void {
-    setDurationHours('0');
-    setDurationMinutes('0');
-    setDurationSeconds('0');
+  function close(): void {
+    clearDraftPoints();
+    selectTaskType(undefined);
+    onClose();
   }
 
   async function submit(): Promise<void> {
@@ -125,9 +114,7 @@ export function TaskPanel({ transport }: Props) {
 
     const geometry = buildGeometry(effectiveGeometryType, draftPoints, altitude, radius, corridorWidth);
     const summary = geometrySummary(geometry);
-    const duration = supportsDuration(taskType)
-      ? parseTaskDuration(durationHours, durationMinutes, durationSeconds)
-      : undefined;
+    const duration = supportsDuration(taskType) ? parseTaskDuration(durationHours, durationMinutes, durationSeconds) : undefined;
     const task: DroneTask = {
       id: createUuid(),
       droneId: selectedDrone.id,
@@ -146,9 +133,8 @@ export function TaskPanel({ transport }: Props) {
     setSubmitting(true);
     try {
       await transport.publishTask(task);
-      clearDraftPoints();
-      resetDuration();
       addEvent({ level: 'INFO', message: `Published ${task.type} task ${task.id}; awaiting TASK_ADMIN`, payload: task });
+      close();
     } catch (error) {
       addEvent({ level: 'ERROR', message: `Task submission failed: ${String(error)}`, payload: task });
     } finally {
@@ -156,123 +142,91 @@ export function TaskPanel({ transport }: Props) {
     }
   }
 
-  async function cancel(): Promise<void> {
-    if (!latestTask || !transport) return;
-    setCancelling(true);
-    try {
-      await transport.cancelTask(latestTask);
-      addEvent({ level: 'INFO', message: `Published cancellation for task ${latestTask.id}; awaiting TASK_ADMIN` });
-    } catch (error) {
-      addEvent({ level: 'ERROR', message: `Task cancellation failed: ${String(error)}` });
-    } finally {
-      setCancelling(false);
-    }
-  }
-
   return (
-    <Paper square sx={{ height: '100%', overflow: 'auto', p: 2 }}>
-      <Typography variant="overline">Selected drone</Typography>
-      <Typography variant="h6">{selectedDrone?.name ?? 'None'}</Typography>
-      {!selectedDrone && <Alert severity="info" sx={{ mt: 1 }}>Select a drone before creating a task.</Alert>}
-      {selectedDrone && supportedTaskTypes.length === 0 && (
-        <Alert severity="info" sx={{ mt: 1 }}>This drone does not advertise any supported task capabilities.</Alert>
-      )}
+    <Dialog
+      open={open}
+      onClose={close}
+      hideBackdrop
+      disableAutoFocus
+      disableEnforceFocus
+      maxWidth="sm"
+      fullWidth
+      sx={{
+        pointerEvents: 'none',
+        '& .MuiDialog-container': { pointerEvents: 'none', alignItems: 'flex-start', justifyContent: 'flex-end' },
+        '& .MuiDialog-paper': { pointerEvents: 'auto', mt: 9, mr: 2, maxHeight: 'calc(100vh - 96px)' },
+      }}
+    >
+      <DialogTitle>Add task · {selectedDrone?.name ?? 'No drone selected'}</DialogTitle>
+      <DialogContent dividers>
+        {!selectedDrone && <Alert severity="info">Select a drone before creating a task.</Alert>}
+        {selectedDrone && supportedTaskTypes.length === 0 && <Alert severity="info">This drone does not advertise any supported task capabilities.</Alert>}
 
-      <Divider sx={{ my: 2 }} />
-      <Typography variant="overline">Task</Typography>
-      {supportedTaskTypes.length > 0 && (
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${taskGridColumns}, minmax(0, 1fr))`,
-            gap: 1,
-            mb: 2,
-          }}
-        >
-          {supportedTaskTypes.map((type) => (
-            <Button
-              key={type}
-              fullWidth
-              variant={taskType === type ? 'contained' : 'outlined'}
-              onClick={() => chooseTask(type)}
-              sx={{ minWidth: 0 }}
+        {supportedTaskTypes.length > 0 && (
+          <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(${getTaskGridColumnCount(supportedTaskTypes.length)}, minmax(0, 1fr))`, gap: 1, mb: 2 }}>
+            {supportedTaskTypes.map((type) => (
+              <Button key={type} fullWidth variant={taskType === type ? 'contained' : 'outlined'} onClick={() => chooseTask(type)} sx={{ minWidth: 0 }}>
+                {type}
+              </Button>
+            ))}
+          </Box>
+        )}
+
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {taskType && effectiveGeometryType ? geometryInstruction(effectiveGeometryType) : 'Choose an advertised task type, then select points on the map.'}
+        </Typography>
+
+        <Stack spacing={2}>
+          {taskType && allowedGeometries.length > 1 && effectiveGeometryType && (
+            <TextField
+              select
+              label="Geometry"
+              value={effectiveGeometryType}
+              onChange={(event) => {
+                setGeometryType(event.target.value as TaskGeometryType);
+                clearDraftPoints();
+              }}
             >
-              {type}
-            </Button>
-          ))}
-        </Box>
-      )}
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        {taskType && effectiveGeometryType ? geometryInstruction(effectiveGeometryType) : 'Choose an advertised task type.'}
-      </Typography>
-
-      <Stack spacing={2}>
-        {taskType && allowedGeometries.length > 1 && effectiveGeometryType && (
-          <TextField
-            select
-            label="Geometry"
-            value={effectiveGeometryType}
-            onChange={(event) => {
-              setGeometryType(event.target.value as TaskGeometryType);
-              clearDraftPoints();
-            }}
-          >
-            {allowedGeometries.map((type) => <MenuItem key={type} value={type}>{geometryLabel(type)}</MenuItem>)}
-          </TextField>
-        )}
-
-        {taskType && <TextField label="Altitude (m)" type="number" value={altitude} onChange={(event) => setAltitude(Number(event.target.value))} />}
-        {effectiveGeometryType === 'CIRCLE' && <TextField label="Radius (m)" type="number" value={radius} onChange={(event) => setRadius(Number(event.target.value))} inputProps={{ min: 1 }} />}
-        {effectiveGeometryType === 'CORRIDOR' && <TextField label="Corridor width (m)" type="number" value={corridorWidth} onChange={(event) => setCorridorWidth(Number(event.target.value))} inputProps={{ min: 1 }} />}
-
-        {supportsDuration(taskType) && (
-          <Box>
-            <Typography variant="overline">Optional duration</Typography>
-            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1 }}>
-              <DurationField label="Hours" value={durationHours} error={durationFieldErrors.hours} onChange={setDurationHours} />
-              <DurationField label="Minutes" value={durationMinutes} error={durationFieldErrors.minutes} onChange={setDurationMinutes} max={59} />
-              <DurationField label="Seconds" value={durationSeconds} error={durationFieldErrors.seconds} onChange={setDurationSeconds} max={59} />
-            </Box>
-            <Typography variant="caption" color="text.secondary">Leave all values at zero to omit duration.</Typography>
-          </Box>
-        )}
-
-        {taskType && <Typography variant="body2">Selected map points: {draftPoints.length}</Typography>}
-        {taskType && draftPoints.map((point, index) => (
-          <Typography key={`${point.latitude}-${point.longitude}-${index}`} variant="caption" color="text.secondary">
-            {index + 1}. {point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}
-          </Typography>
-        ))}
-
-        {taskType && !authorityGuid && selectedDrone && <Alert severity="warning">The node description does not advertise an authority GUID for {taskType}.</Alert>}
-        {taskType && geometryError && draftPoints.length > 0 && <Alert severity="info">{geometryError}</Alert>}
-
-        {taskType && (
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button startIcon={<UndoIcon />} onClick={undoDraftPoint} disabled={draftPoints.length === 0}>Undo</Button>
-            <Button startIcon={<DeleteSweepIcon />} onClick={clearDraftPoints} disabled={draftPoints.length === 0}>Clear</Button>
-            <Button fullWidth variant="contained" startIcon={<SendIcon />} disabled={!canSubmit} onClick={submit}>{submitting ? 'Publishing…' : 'Submit'}</Button>
-          </Box>
-        )}
-      </Stack>
-
-      <Divider sx={{ my: 2 }} />
-      <Typography variant="overline">Latest task</Typography>
-      {latestTask ? (
-        <Stack spacing={1}>
-          <Typography variant="subtitle2">{latestTask.type} · {latestTask.geometry.type}</Typography>
-          <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{latestTask.id}</Typography>
-          <Alert severity={taskSeverity(latestTask.state)}>{latestTask.state}{latestTask.message ? ` · ${latestTask.message}` : ''}</Alert>
-          {latestTask.percentComplete !== undefined && (
-            <Stack spacing={0.5}>
-              <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, latestTask.percentComplete))} />
-              <Typography variant="caption" color="text.secondary">{latestTask.percentComplete.toFixed(1)}% complete</Typography>
-            </Stack>
+              {allowedGeometries.map((type) => <MenuItem key={type} value={type}>{geometryLabel(type)}</MenuItem>)}
+            </TextField>
           )}
-          <Button color="error" variant="outlined" startIcon={<CancelIcon />} disabled={cancelling || !CANCELLABLE_TASK_STATES.has(latestTask.state)} onClick={cancel}>{cancelling ? 'Cancelling…' : 'Cancel task'}</Button>
+
+          {taskType && <TextField label="Altitude (m)" type="number" value={altitude} onChange={(event) => setAltitude(Number(event.target.value))} />}
+          {effectiveGeometryType === 'CIRCLE' && <TextField label="Radius (m)" type="number" value={radius} onChange={(event) => setRadius(Number(event.target.value))} inputProps={{ min: 1 }} />}
+          {effectiveGeometryType === 'CORRIDOR' && <TextField label="Corridor width (m)" type="number" value={corridorWidth} onChange={(event) => setCorridorWidth(Number(event.target.value))} inputProps={{ min: 1 }} />}
+
+          {supportsDuration(taskType) && (
+            <Box>
+              <Typography variant="overline">Optional duration</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1 }}>
+                <DurationField label="Hours" value={durationHours} error={durationFieldErrors.hours} onChange={setDurationHours} />
+                <DurationField label="Minutes" value={durationMinutes} error={durationFieldErrors.minutes} onChange={setDurationMinutes} max={59} />
+                <DurationField label="Seconds" value={durationSeconds} error={durationFieldErrors.seconds} onChange={setDurationSeconds} max={59} />
+              </Box>
+              <Typography variant="caption" color="text.secondary">Leave all values at zero to omit duration.</Typography>
+            </Box>
+          )}
+
+          {taskType && <Typography variant="body2">Selected map points: {draftPoints.length}</Typography>}
+          {taskType && draftPoints.map((point, index) => (
+            <Typography key={`${point.latitude}-${point.longitude}-${index}`} variant="caption" color="text.secondary">
+              {index + 1}. {point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}
+            </Typography>
+          ))}
+          {taskType && !authorityGuid && selectedDrone && <Alert severity="warning">The node description does not advertise an authority GUID for {taskType}.</Alert>}
+          {taskType && geometryError && draftPoints.length > 0 && <Alert severity="info">{geometryError}</Alert>}
         </Stack>
-      ) : <Typography variant="body2" color="text.secondary">No task for this drone.</Typography>}
-    </Paper>
+      </DialogContent>
+      <DialogActions>
+        <Button startIcon={<UndoIcon />} onClick={undoDraftPoint} disabled={draftPoints.length === 0}>Undo</Button>
+        <Button startIcon={<DeleteSweepIcon />} onClick={clearDraftPoints} disabled={draftPoints.length === 0}>Clear</Button>
+        <Box sx={{ flex: 1 }} />
+        <Button onClick={close}>Close</Button>
+        <Button variant="contained" startIcon={<SendIcon />} disabled={!canSubmit} onClick={() => void submit()}>
+          {submitting ? 'Publishing…' : 'Submit'}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
@@ -301,7 +255,6 @@ function DurationField({ label, value, error, max, onChange }: DurationFieldProp
 function durationErrors(hours: string, minutes: string, seconds: string): Partial<Record<keyof TaskDuration, string>> {
   const values = { hours, minutes, seconds };
   const errors: Partial<Record<keyof TaskDuration, string>> = {};
-
   (Object.keys(values) as Array<keyof TaskDuration>).forEach((field) => {
     const raw = values[field].trim();
     if (!/^\d+$/.test(raw)) {
@@ -309,11 +262,8 @@ function durationErrors(hours: string, minutes: string, seconds: string): Partia
       return;
     }
     const value = Number(raw);
-    if ((field === 'minutes' || field === 'seconds') && value > 59) {
-      errors[field] = `${capitalise(field)} must be between 0 and 59.`;
-    }
+    if ((field === 'minutes' || field === 'seconds') && value > 59) errors[field] = `${capitalise(field)} must be between 0 and 59.`;
   });
-
   if (Object.keys(errors).length === 0) {
     const validationError = validateTaskDuration(parseTaskDuration(hours, minutes, seconds));
     if (validationError) errors.hours = validationError;
@@ -329,9 +279,8 @@ function totalDurationSeconds(duration: TaskDuration): number {
   return duration.hours * 3600 + duration.minutes * 60 + duration.seconds;
 }
 
-function capitalise(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
+function capitalise(value: string): string { return value.charAt(0).toUpperCase() + value.slice(1); }
+function normaliseTaskType(value: string): string { return value.replace('TaskTypeEnum_', ''); }
 
 function getTaskGridColumnCount(taskCount: number): number {
   if (taskCount <= 0) return 1;
@@ -339,8 +288,6 @@ function getTaskGridColumnCount(taskCount: number): number {
   if (taskCount === 4) return 2;
   return 3;
 }
-
-function normaliseTaskType(value: string): string { return value.replace('TaskTypeEnum_', ''); }
 
 function buildGeometry(type: TaskGeometryType, points: GeoPoint[], altitude: number, radius: number, corridorWidth: number): TaskGeometry {
   const elevated = points.map((point) => ({ ...point, altitude }));
@@ -387,7 +334,5 @@ function geometryInstruction(type: TaskGeometryType): string {
 }
 
 function geometryLabel(type: TaskGeometryType): string {
-  if (type === 'CIRCLE') return 'Circle';
-  return type.charAt(0) + type.slice(1).toLowerCase();
+  return type === 'CIRCLE' ? 'Circle' : type.charAt(0) + type.slice(1).toLowerCase();
 }
-
