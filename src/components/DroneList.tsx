@@ -130,6 +130,9 @@ const DroneListItem = memo(function DroneListItem({
 
   if (!row) return null;
 
+  const rowId = row.id;
+  const rowName = row.name;
+  const activeTask = row.activeTask;
   const liveState = telemetryLabel(row, now);
   const detectDisabled = detecting || !row.connected || row.systemId === undefined;
   const detectTooltip = row.systemId === undefined
@@ -141,48 +144,48 @@ const DroneListItem = memo(function DroneListItem({
   async function detect(): Promise<void> {
     setDetecting(true);
     try {
-      await onDetect(row.id);
+      await onDetect(rowId);
     } catch (error) {
-      addEvent({ level: 'ERROR', message: `Detect failed for ${row.name}: ${String(error)}` });
+      addEvent({ level: 'ERROR', message: `Detect failed for ${rowName}: ${String(error)}` });
     } finally {
       setDetecting(false);
     }
   }
 
   function addTask(): void {
-    selectDrone(row.id);
+    selectDrone(rowId);
     onAddTask();
   }
 
   async function cancelTask(): Promise<void> {
-    if (!row.activeTask || !transport) return;
+    if (!activeTask || !transport) return;
     setCancelling(true);
     try {
-      await transport.cancelTask(row.activeTask);
-      addEvent({ level: 'INFO', message: `Published cancellation for task ${row.activeTask.id}; awaiting TASK_ADMIN` });
+      await transport.cancelTask(activeTask);
+      addEvent({ level: 'INFO', message: `Published cancellation for task ${activeTask.id}; awaiting TASK_ADMIN` });
     } catch (error) {
-      addEvent({ level: 'ERROR', message: `Task cancellation failed for ${row.name}: ${String(error)}` });
+      addEvent({ level: 'ERROR', message: `Task cancellation failed for ${rowName}: ${String(error)}` });
     } finally {
       setCancelling(false);
     }
   }
 
-  const cancellingState = row.activeTask?.state === 'CANCEL_REQUESTED' || row.activeTask?.state === 'PREEMPTING';
+  const cancellingState = activeTask?.state === 'CANCEL_REQUESTED' || activeTask?.state === 'PREEMPTING';
 
   return (
-    <ListItemButton selected={row.selected} onClick={() => selectDrone(row.id)} sx={{ alignItems: 'center', gap: 1.25, py: 1.25 }}>
+    <ListItemButton selected={row.selected} onClick={() => selectDrone(rowId)} sx={{ alignItems: 'center', gap: 1.25, py: 1.25 }}>
       <DroneLiveTelemetry droneId={droneId} />
 
       <Box sx={{ minWidth: 0, flex: 1 }}>
         <Stack direction="row" spacing={0.5} alignItems="center">
-          <Typography variant="body2" noWrap sx={{ minWidth: 0, flex: 1 }}>{row.name}</Typography>
+          <Typography variant="body2" noWrap sx={{ minWidth: 0, flex: 1 }}>{rowName}</Typography>
           <Tooltip title="Drone details">
             <IconButton
               size="small"
-              aria-label={`Show details for ${row.name}`}
+              aria-label={`Show details for ${rowName}`}
               onClick={(event) => {
                 event.stopPropagation();
-                onShowDetails(row.id);
+                onShowDetails(rowId);
               }}
             >
               <InfoOutlinedIcon fontSize="small" />
@@ -196,28 +199,28 @@ const DroneListItem = memo(function DroneListItem({
           <Chip size="small" label={streamStatusLabel(row.streamStatus)} color={streamStatusColor(row.streamStatus)} variant={row.hasStreamStatus ? 'filled' : 'outlined'} />
         </Stack>
 
-        {row.activeTask && (
+        {activeTask && (
           <Box sx={{ mt: 1 }}>
             <Typography variant="caption" color="text.secondary">
-              {row.activeTask.type} · {row.activeTask.geometry.type} · {row.activeTask.state}
+              {activeTask.type} · {activeTask.geometry.type} · {activeTask.state}
             </Typography>
-            {row.activeTask.percentComplete !== undefined && (
+            {activeTask.percentComplete !== undefined && (
               <Stack spacing={0.25} sx={{ mt: 0.5 }}>
-                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, row.activeTask.percentComplete))} />
-                <Typography variant="caption" color="text.secondary">{row.activeTask.percentComplete.toFixed(1)}% complete</Typography>
+                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, activeTask.percentComplete))} />
+                <Typography variant="caption" color="text.secondary">{activeTask.percentComplete.toFixed(1)}% complete</Typography>
               </Stack>
             )}
           </Box>
         )}
 
         <Stack direction="row" spacing={0.75} sx={{ mt: 0.75 }}>
-          {row.activeTask ? (
+          {activeTask ? (
             <Button
               size="small"
               color="error"
               variant="outlined"
               startIcon={<CancelIcon />}
-              disabled={cancelling || cancellingState || !transport || !CANCELLABLE_TASK_STATES.has(row.activeTask.state)}
+              disabled={cancelling || cancellingState || !transport || !CANCELLABLE_TASK_STATES.has(activeTask.state)}
               onClick={(event) => {
                 event.stopPropagation();
                 void cancelTask();
