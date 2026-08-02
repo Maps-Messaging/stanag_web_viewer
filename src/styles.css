@@ -16,7 +16,7 @@ html, body, #root {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 330px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) 180px;
   grid-template-areas:
     "drones map"
@@ -80,10 +80,10 @@ html, body, #root {
 
 .drone-live-telemetry {
   display: flex;
-  flex: 0 0 58px;
+  flex: 0 0 66px;
   flex-direction: column;
   align-items: center;
-  min-width: 58px;
+  min-width: 66px;
 }
 
 .attitude-indicator {
@@ -166,16 +166,24 @@ html, body, #root {
   white-space: nowrap;
 }
 
-.drone-heading {
+.drone-heading,
+.drone-speed {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  margin-top: 5px;
   color: rgb(255 255 255 / 70%);
   font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.drone-heading {
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.drone-speed {
+  margin-top: 3px;
 }
 
 .drone-heading__arrow {
@@ -196,7 +204,7 @@ html, body, #root {
 
 @media (max-width: 900px) {
   .workspace {
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
   }
 }
 
