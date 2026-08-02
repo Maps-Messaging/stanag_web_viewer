@@ -283,9 +283,6 @@ const DroneLiveTelemetry = memo(function DroneLiveTelemetry({ droneId }: { drone
         <span className="drone-heading__arrow" style={{ transform: `rotate(${telemetry.heading}deg)` }}>▲</span>
         <span>{formatHeading(telemetry.heading)}</span>
       </div>
-      {telemetry.groundSpeed !== undefined && (
-        <div className="drone-speed">{formatSpeed(telemetry.groundSpeed)}</div>
-      )}
     </div>
   );
 });
