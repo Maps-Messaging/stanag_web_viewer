@@ -272,6 +272,7 @@ const DroneLiveTelemetry = memo(function DroneLiveTelemetry({ droneId }: { drone
       roll: drone?.roll,
       pitch: drone?.pitch,
       altitude: drone?.position?.altitude,
+      groundSpeed: drone?.twin?.groundSpeedMetersPerSecond ?? drone?.groundSpeed,
     };
   }));
 
@@ -282,6 +283,9 @@ const DroneLiveTelemetry = memo(function DroneLiveTelemetry({ droneId }: { drone
         <span className="drone-heading__arrow" style={{ transform: `rotate(${telemetry.heading}deg)` }}>▲</span>
         <span>{formatHeading(telemetry.heading)}</span>
       </div>
+      {telemetry.groundSpeed !== undefined && (
+        <div className="drone-speed">{formatSpeed(telemetry.groundSpeed)}</div>
+      )}
     </div>
   );
 });
@@ -296,6 +300,10 @@ function formatAge(milliseconds: number): string {
 function formatHeading(value: number): string {
   const heading = (value % 360 + 360) % 360;
   return `${heading.toFixed(1)}°`;
+}
+
+function formatSpeed(value: number): string {
+  return `${value.toFixed(1)} m/s`;
 }
 
 function shortEnum(value: string): string {
