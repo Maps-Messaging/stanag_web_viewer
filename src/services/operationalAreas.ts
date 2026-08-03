@@ -3,14 +3,14 @@ import maplibregl, { type GeoJSONSourceSpecification, type IControl, type Map as
 interface OperationalAreaDefinition {
   id: string;
   title: string;
-  url: string;
+  path: string;
   colour: string;
 }
 
 const OPERATIONAL_AREAS: OperationalAreaDefinition[] = [
-  { id: 'offshore', title: 'Offshore', url: '/layers/offshore.geojson', colour: '#42a5f5' },
-  { id: 'rio-1', title: 'Rio 1', url: '/layers/rio_1.geojson', colour: '#26c6da' },
-  { id: 'rio-2', title: 'Rio 2', url: '/layers/rio_2.geojson', colour: '#66bb6a' },
+  { id: 'offshore', title: 'Offshore', path: 'layers/offshore.geojson', colour: '#42a5f5' },
+  { id: 'rio-1', title: 'Rio 1', path: 'layers/rio_1.geojson', colour: '#26c6da' },
+  { id: 'rio-2', title: 'Rio 2', path: 'layers/rio_2.geojson', colour: '#66bb6a' },
 ];
 
 const installedMaps = new WeakSet<MapLibreMap>();
@@ -84,8 +84,13 @@ class OperationalAreaControl implements IControl {
 
     try {
       const collections = await Promise.all(OPERATIONAL_AREAS.map(async (area) => {
-        const response = await fetch(area.url);
-        if (!response.ok) throw new Error(`${area.title}: HTTP ${response.status}`);
+        const url = new URL(area.path, `${globalThis.location.origin}${import.meta.env.BASE_URL}`).toString();
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`${area.title}: HTTP ${response.status} loading ${url}`);
+        const contentType = response.headers.get('content-type') ?? '';
+        if (!contentType.includes('json') && !contentType.includes('geo+json')) {
+          throw new Error(`${area.title}: expected GeoJSON but received ${contentType || 'unknown content type'} from ${url}`);
+        }
         const data = await response.json() as GeoJSON.FeatureCollection;
         if (data.type !== 'FeatureCollection') throw new Error(`${area.title}: expected a GeoJSON FeatureCollection`);
         return { area, data };
@@ -95,8 +100,10 @@ class OperationalAreaControl implements IControl {
       this.loaded = true;
       this.setVisible(true);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       this.button.textContent = 'Area load failed';
-      this.button.title = String(error);
+      this.button.title = message;
+      useAppStoreError(message);
       console.error('Operational area load failed', error);
     } finally {
       this.loading = false;
@@ -215,4 +222,8 @@ class OperationalAreaControl implements IControl {
     this.button.textContent = visible ? 'Hide areas' : 'Show areas';
     this.button.dataset.active = String(visible);
   }
+}
+
+function useAppStoreError(message: string): void {
+  globalThis.dispatchEvent(new CustomEvent('operational-area-error', { detail: message }));
 }
