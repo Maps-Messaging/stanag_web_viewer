@@ -650,6 +650,7 @@ function mapTaskState(state: string): TaskState {
     case 'TaskStateEnum_SUCCEEDED': return 'COMPLETED';
     case 'TaskStateEnum_PREEMPTING': return 'PREEMPTING';
     case 'TaskStateEnum_PREEMPTED': return 'PREEMPTED';
+    case 'TaskStateEnum_RECALLED':
     case 'TaskStateEnum_CANCELLED':
     case 'TaskStateEnum_CANCELED': return 'CANCELLED';
     case 'TaskStateEnum_REJECTED': return 'REJECTED';
