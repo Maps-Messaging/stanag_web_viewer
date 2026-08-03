@@ -1,3 +1,4 @@
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import SendIcon from '@mui/icons-material/Send';
 import UndoIcon from '@mui/icons-material/Undo';
@@ -5,13 +6,13 @@ import {
   Alert,
   Box,
   Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
+  Divider,
+  IconButton,
   MenuItem,
+  Paper,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
@@ -23,7 +24,6 @@ import { createUuid } from '../services/uuid';
 import { useAppStore } from '../state/useAppStore';
 
 interface Props {
-  open: boolean;
   onClose: () => void;
   transport?: MessageTransport;
 }
@@ -41,7 +41,7 @@ const TASK_GEOMETRIES: Record<TaskType, TaskGeometryType[]> = {
   SCREEN: VOLUME_TASK_GEOMETRIES,
 };
 
-export function TaskPanel({ open, onClose, transport }: Props) {
+export function TaskPanel({ onClose, transport }: Props) {
   const selectedDroneId = useAppStore((state) => state.selectedDroneId);
   const selectedDrone = useAppStore(useShallow((state) => {
     const drone = selectedDroneId ? state.drones[selectedDroneId] : undefined;
@@ -143,43 +143,52 @@ export function TaskPanel({ open, onClose, transport }: Props) {
   }
 
   return (
-    <Dialog
-      open={open}
-      onClose={close}
-      hideBackdrop
-      disableAutoFocus
-      disableEnforceFocus
-      maxWidth="sm"
-      fullWidth
-      sx={{
-        pointerEvents: 'none',
-        '& .MuiDialog-container': { pointerEvents: 'none', alignItems: 'flex-start', justifyContent: 'flex-end' },
-        '& .MuiDialog-paper': { pointerEvents: 'auto', mt: 9, mr: 2, maxHeight: 'calc(100vh - 96px)' },
-      }}
-    >
-      <DialogTitle>Add task · {selectedDrone?.name ?? 'No drone selected'}</DialogTitle>
-      <DialogContent dividers>
-        {!selectedDrone && <Alert severity="info">Select a drone before creating a task.</Alert>}
-        {selectedDrone && supportedTaskTypes.length === 0 && <Alert severity="info">This drone does not advertise any supported task capabilities.</Alert>}
+    <Paper square sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Box sx={{ px: 1.5, py: 1.25, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Tooltip title="Back to vehicles">
+          <IconButton size="small" onClick={close} aria-label="Back to vehicles">
+            <ArrowBackIcon />
+          </IconButton>
+        </Tooltip>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="overline">Create task</Typography>
+          <Typography variant="subtitle1" noWrap>{selectedDrone?.name ?? 'No vehicle selected'}</Typography>
+        </Box>
+      </Box>
+
+      <Divider />
+
+      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 1.5 }}>
+        {!selectedDrone && <Alert severity="info">Select a vehicle before creating a task.</Alert>}
+        {selectedDrone && supportedTaskTypes.length === 0 && <Alert severity="info">This vehicle does not advertise any supported task capabilities.</Alert>}
 
         {supportedTaskTypes.length > 0 && (
-          <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(${getTaskGridColumnCount(supportedTaskTypes.length)}, minmax(0, 1fr))`, gap: 1, mb: 2 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.75, mb: 1.5 }}>
             {supportedTaskTypes.map((type) => (
-              <Button key={type} fullWidth variant={taskType === type ? 'contained' : 'outlined'} onClick={() => chooseTask(type)} sx={{ minWidth: 0 }}>
+              <Button
+                key={type}
+                size="small"
+                fullWidth
+                variant={taskType === type ? 'contained' : 'outlined'}
+                onClick={() => chooseTask(type)}
+                sx={{ minWidth: 0, px: 0.5 }}
+              >
                 {type}
               </Button>
             ))}
           </Box>
         )}
 
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           {taskType && effectiveGeometryType ? geometryInstruction(effectiveGeometryType) : 'Choose an advertised task type, then select points on the map.'}
         </Typography>
 
-        <Stack spacing={2}>
+        <Stack spacing={1.5}>
           {taskType && allowedGeometries.length > 1 && effectiveGeometryType && (
             <TextField
+              size="small"
               select
+              fullWidth
               label="Geometry"
               value={effectiveGeometryType}
               onChange={(event) => {
@@ -191,14 +200,14 @@ export function TaskPanel({ open, onClose, transport }: Props) {
             </TextField>
           )}
 
-          {taskType && <TextField label="Altitude (m)" type="number" value={altitude} onChange={(event) => setAltitude(Number(event.target.value))} />}
-          {effectiveGeometryType === 'CIRCLE' && <TextField label="Radius (m)" type="number" value={radius} onChange={(event) => setRadius(Number(event.target.value))} inputProps={{ min: 1 }} />}
-          {effectiveGeometryType === 'CORRIDOR' && <TextField label="Corridor width (m)" type="number" value={corridorWidth} onChange={(event) => setCorridorWidth(Number(event.target.value))} inputProps={{ min: 1 }} />}
+          {taskType && <TextField size="small" fullWidth label="Altitude (m)" type="number" value={altitude} onChange={(event) => setAltitude(Number(event.target.value))} />}
+          {effectiveGeometryType === 'CIRCLE' && <TextField size="small" fullWidth label="Radius (m)" type="number" value={radius} onChange={(event) => setRadius(Number(event.target.value))} inputProps={{ min: 1 }} />}
+          {effectiveGeometryType === 'CORRIDOR' && <TextField size="small" fullWidth label="Corridor width (m)" type="number" value={corridorWidth} onChange={(event) => setCorridorWidth(Number(event.target.value))} inputProps={{ min: 1 }} />}
 
           {supportsDuration(taskType) && (
             <Box>
               <Typography variant="overline">Optional duration</Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 0.75 }}>
                 <DurationField label="Hours" value={durationHours} error={durationFieldErrors.hours} onChange={setDurationHours} />
                 <DurationField label="Minutes" value={durationMinutes} error={durationFieldErrors.minutes} onChange={setDurationMinutes} max={59} />
                 <DurationField label="Seconds" value={durationSeconds} error={durationFieldErrors.seconds} onChange={setDurationSeconds} max={59} />
@@ -207,26 +216,31 @@ export function TaskPanel({ open, onClose, transport }: Props) {
             </Box>
           )}
 
-          {taskType && <Typography variant="body2">Selected map points: {draftPoints.length}</Typography>}
-          {taskType && draftPoints.map((point, index) => (
-            <Typography key={`${point.latitude}-${point.longitude}-${index}`} variant="caption" color="text.secondary">
-              {index + 1}. {point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}
-            </Typography>
-          ))}
-          {taskType && !authorityGuid && selectedDrone && <Alert severity="warning">The node description does not advertise an authority GUID for {taskType}.</Alert>}
+          {taskType && (
+            <Box>
+              <Typography variant="body2">Selected map points: {draftPoints.length}</Typography>
+              {draftPoints.length > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  Use Undo to remove the last point or Clear to restart the geometry.
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          {taskType && !authorityGuid && selectedDrone && <Alert severity="warning">No authority GUID is advertised for {taskType}.</Alert>}
           {taskType && geometryError && draftPoints.length > 0 && <Alert severity="info">{geometryError}</Alert>}
         </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button startIcon={<UndoIcon />} onClick={undoDraftPoint} disabled={draftPoints.length === 0}>Undo</Button>
-        <Button startIcon={<DeleteSweepIcon />} onClick={clearDraftPoints} disabled={draftPoints.length === 0}>Clear</Button>
-        <Box sx={{ flex: 1 }} />
-        <Button onClick={close}>Close</Button>
-        <Button variant="contained" startIcon={<SendIcon />} disabled={!canSubmit} onClick={() => void submit()}>
+      </Box>
+
+      <Divider />
+      <Box sx={{ p: 1.25, display: 'grid', gridTemplateColumns: 'auto auto minmax(0, 1fr)', gap: 0.75 }}>
+        <Button size="small" startIcon={<UndoIcon />} onClick={undoDraftPoint} disabled={draftPoints.length === 0}>Undo</Button>
+        <Button size="small" startIcon={<DeleteSweepIcon />} onClick={clearDraftPoints} disabled={draftPoints.length === 0}>Clear</Button>
+        <Button size="small" fullWidth variant="contained" startIcon={<SendIcon />} disabled={!canSubmit} onClick={() => void submit()}>
           {submitting ? 'Publishing…' : 'Submit'}
         </Button>
-      </DialogActions>
-    </Dialog>
+      </Box>
+    </Paper>
   );
 }
 
@@ -241,6 +255,7 @@ interface DurationFieldProps {
 function DurationField({ label, value, error, max, onChange }: DurationFieldProps) {
   return (
     <TextField
+      size="small"
       label={label}
       type="number"
       value={value}
@@ -281,13 +296,6 @@ function totalDurationSeconds(duration: TaskDuration): number {
 
 function capitalise(value: string): string { return value.charAt(0).toUpperCase() + value.slice(1); }
 function normaliseTaskType(value: string): string { return value.replace('TaskTypeEnum_', ''); }
-
-function getTaskGridColumnCount(taskCount: number): number {
-  if (taskCount <= 0) return 1;
-  if (taskCount <= 3) return taskCount;
-  if (taskCount === 4) return 2;
-  return 3;
-}
 
 function buildGeometry(type: TaskGeometryType, points: GeoPoint[], altitude: number, radius: number, corridorWidth: number): TaskGeometry {
   const elevated = points.map((point) => ({ ...point, altitude }));
