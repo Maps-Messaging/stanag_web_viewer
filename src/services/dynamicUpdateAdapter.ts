@@ -2,6 +2,8 @@ import type { Detection, GeoPoint } from '../models/types';
 
 export const DETECTION_TTL_MILLISECONDS = 2 * 60 * 1000;
 
+const dataProductUrlsByTrackId = new Map<string, string[]>();
+
 export interface ParsedDataProduct {
   id: string;
   sourceId: string;
@@ -34,6 +36,7 @@ export function parseDynamicTrack(payload: unknown, receivedAt = Date.now()): De
   }
 
   const track = asObject(putValue.track, 'body.operation.put_value.track');
+  const trackId = asString(track.identifier, 'track.identifier');
   const description = optionalObject(track.description);
   const pose = asObject(track.pose, 'track.pose');
   const position = asObject(pose.position, 'track.pose.position');
@@ -43,9 +46,12 @@ export function parseDynamicTrack(payload: unknown, receivedAt = Date.now()): De
 
   const coordinates = asObject(position.latitude_longitude_altitude, 'track.pose.position.latitude_longitude_altitude');
   const timestamp = parseTimestamp(track.timestamp) ?? parseTimestamp(header.time_sent) ?? receivedAt;
+  const directUrl = findRtspUrl(track);
+  const productUrls = dataProductUrlsByTrackId.get(trackId) ?? [];
+  const urls = mergeUrls(directUrl ? [directUrl] : [], productUrls);
 
   return {
-    id: asString(track.identifier, 'track.identifier'),
+    id: trackId,
     sourceId: asString(header.source, 'header.source'),
     name: optionalString(description?.name) ?? 'Detection',
     position: parseGeoPoint(coordinates),
@@ -66,7 +72,7 @@ export function parseDynamicTrack(payload: unknown, receivedAt = Date.now()): De
     initiatedAt: parseTimestamp(track.time_of_initiation),
     sourceValidUntil: parseTimestamp(track.time_of_validity),
     expiresAt: receivedAt + DETECTION_TTL_MILLISECONDS,
-    rtspUrl: findRtspUrl(track),
+    rtspUrl: urls.length > 0 ? urls.join(', ') : undefined,
     raw: payload,
   };
 }
@@ -101,7 +107,7 @@ export function parseDynamicDataProduct(payload: unknown, receivedAt = Date.now(
     return uri ? [uri] : [];
   });
 
-  return {
+  const parsed: ParsedDataProduct = {
     id: asString(dataProduct.identifier, 'data_product.identifier'),
     sourceId: asString(header.source, 'header.source'),
     description: optionalString(description?.description) ?? optionalString(description?.name),
@@ -110,6 +116,16 @@ export function parseDynamicDataProduct(payload: unknown, receivedAt = Date.now(
     urls: [...new Set(urls)],
     raw: payload,
   };
+
+  parsed.trackIds.forEach((trackId) => {
+    dataProductUrlsByTrackId.set(trackId, mergeUrls(dataProductUrlsByTrackId.get(trackId) ?? [], parsed.urls));
+  });
+
+  return parsed;
+}
+
+function mergeUrls(existing: string[], incoming: string[]): string[] {
+  return [...new Set([...existing, ...incoming])];
 }
 
 function parsePutValue(envelope: Record<string, unknown>): Record<string, unknown> {
