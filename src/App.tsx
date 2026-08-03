@@ -32,7 +32,7 @@ export default function App() {
   const updateConfiguration = useAppStore((state) => state.updateConfiguration);
   const addEvent = useAppStore((state) => state.addEvent);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  const [taskEditorOpen, setTaskEditorOpen] = useState(false);
   const [transport, setTransport] = useState<MessageTransport>();
   const transportRef = useRef<MessageTransport | undefined>(undefined);
   const connectionGenerationRef = useRef(0);
@@ -142,17 +142,20 @@ export default function App() {
         <ConnectionBar onOpenSettings={() => setSettingsOpen(true)} />
         <main className="workspace">
           <aside className="drone-list">
-            <DroneList
-              onDetect={detectDrone}
-              onAddTask={() => setTaskDialogOpen(true)}
-              transport={transport}
-            />
+            {taskEditorOpen ? (
+              <TaskPanel onClose={() => setTaskEditorOpen(false)} transport={transport} />
+            ) : (
+              <DroneList
+                onDetect={detectDrone}
+                onAddTask={() => setTaskEditorOpen(true)}
+                transport={transport}
+              />
+            )}
           </aside>
           <section className="map-panel"><MapView /></section>
           <section className="event-log"><EventLog /></section>
         </main>
       </div>
-      <TaskPanel open={taskDialogOpen} onClose={() => setTaskDialogOpen(false)} transport={transport} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onApply={applySettings} />
     </ThemeProvider>
   );
