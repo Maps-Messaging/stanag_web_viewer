@@ -2,9 +2,18 @@ import type { Detection, GeoPoint } from '../models/types';
 
 export const DETECTION_TTL_MILLISECONDS = 2 * 60 * 1000;
 
-export function parseDynamicTrack(payload: unknown, receivedAt = Date.now()): Detection {
+export interface ParsedDataProduct {
+  id: string;
+  sourceId: string;
+  description?: string;
+  timestamp: number;
+  trackIds: string[];
+  urls: string[];
+  raw: unknown;
+}
+
+export function getDynamicUpdateValueType(payload: unknown): string {
   const envelope = asObject(payload, 'message');
-  const header = asObject(envelope.header, 'header');
   const body = asObject(envelope.body, 'body');
   const operation = asObject(body.operation, 'body.operation');
 
@@ -12,7 +21,14 @@ export function parseDynamicTrack(payload: unknown, receivedAt = Date.now()): De
     throw new Error(`Unsupported dynamic update operation: ${String(operation.$discriminator)}`);
   }
 
-  const putValue = asObject(operation.put_value, 'body.operation.put_value');
+  return asString(asObject(operation.put_value, 'body.operation.put_value').$discriminator, 'body.operation.put_value.$discriminator');
+}
+
+export function parseDynamicTrack(payload: unknown, receivedAt = Date.now()): Detection {
+  const envelope = asObject(payload, 'message');
+  const header = asObject(envelope.header, 'header');
+  const putValue = parsePutValue(envelope);
+
   if (putValue.$discriminator !== 'ValueTypeEnum_TRACK') {
     throw new Error(`Unsupported dynamic update value: ${String(putValue.$discriminator)}`);
   }
@@ -53,6 +69,56 @@ export function parseDynamicTrack(payload: unknown, receivedAt = Date.now()): De
     rtspUrl: findRtspUrl(track),
     raw: payload,
   };
+}
+
+export function parseDynamicDataProduct(payload: unknown, receivedAt = Date.now()): ParsedDataProduct {
+  const envelope = asObject(payload, 'message');
+  const header = asObject(envelope.header, 'header');
+  const putValue = parsePutValue(envelope);
+
+  if (putValue.$discriminator !== 'ValueTypeEnum_DATA_PRODUCT') {
+    throw new Error(`Unsupported dynamic update value: ${String(putValue.$discriminator)}`);
+  }
+
+  const dataProduct = asObject(putValue.data_product, 'body.operation.put_value.data_product');
+  const description = optionalObject(dataProduct.description);
+  const references = Array.isArray(dataProduct.references) ? dataProduct.references : [];
+  const products = Array.isArray(dataProduct.products) ? dataProduct.products : [];
+
+  const trackIds = references.flatMap((value, index) => {
+    const reference = optionalObject(value);
+    if (!reference || reference.value_type !== 'ValueTypeEnum_TRACK') return [];
+    const identifier = optionalString(reference.identifier);
+    if (!identifier) throw new Error(`Expected track reference identifier: data_product.references[${index}].identifier`);
+    return [identifier];
+  });
+
+  const urls = products.flatMap((value) => {
+    const product = optionalObject(value);
+    if (!product || product.$discriminator !== 'ProductTypeEnum_URI') return [];
+    const uriProduct = optionalObject(product.uri);
+    const uri = optionalString(uriProduct?.uri);
+    return uri ? [uri] : [];
+  });
+
+  return {
+    id: asString(dataProduct.identifier, 'data_product.identifier'),
+    sourceId: asString(header.source, 'header.source'),
+    description: optionalString(description?.description) ?? optionalString(description?.name),
+    timestamp: parseTimestamp(dataProduct.timestamp) ?? parseTimestamp(header.time_sent) ?? receivedAt,
+    trackIds: [...new Set(trackIds)],
+    urls: [...new Set(urls)],
+    raw: payload,
+  };
+}
+
+function parsePutValue(envelope: Record<string, unknown>): Record<string, unknown> {
+  const body = asObject(envelope.body, 'body');
+  const operation = asObject(body.operation, 'body.operation');
+  if (operation.$discriminator !== 'DynamicUpdateOperationTypeEnum_PUT_VALUE') {
+    throw new Error(`Unsupported dynamic update operation: ${String(operation.$discriminator)}`);
+  }
+  return asObject(operation.put_value, 'body.operation.put_value');
 }
 
 function parseGeoPoint(value: Record<string, unknown>): GeoPoint {
