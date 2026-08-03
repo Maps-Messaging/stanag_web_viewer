@@ -1,11 +1,18 @@
-import type { DroneTask, DroneTelemetryUpdate, GeoPoint, MavlinkSequenceStatus, MavlinkStreamStatus, TwinState } from '../models/types';
-import { parseDynamicTrack } from '../services/dynamicUpdateAdapter';
+import type { Detection, DroneTask, DroneTelemetryUpdate, GeoPoint, MavlinkSequenceStatus, MavlinkStreamStatus, TwinState } from '../models/types';
+import {
+  getDynamicUpdateValueType,
+  parseDynamicDataProduct,
+  parseDynamicTrack,
+  type ParsedDataProduct,
+} from '../services/dynamicUpdateAdapter';
 import { mergePercentComplete, shouldApplyTaskState } from '../services/operationalState';
 import { getStanagMessageType, parseNodeMessage, parseTaskAdmin, parseTaskStatus, type ParsedTaskStatus } from '../services/stanagAdapter';
 import { useAppStore } from '../state/useAppStore';
 
 const PENDING_TASK_STATUS_TTL_MILLIS = 30_000;
+const PENDING_DATA_PRODUCT_TTL_MILLIS = 2 * 60 * 1000;
 const pendingTaskStatuses = new Map<string, { status: ParsedTaskStatus; expiresAt: number }>();
+const pendingDataProducts = new Map<string, { products: ParsedDataProduct[]; expiresAt: number }>();
 
 export function dispatchStanagMessage(payload: unknown): void {
   try {
@@ -54,23 +61,34 @@ function dispatchValidatedStanagMessage(payload: unknown): void {
 function dispatchDynamicUpdate(payload: unknown): void {
   const store = useAppStore.getState();
   try {
-    const detection = parseDynamicTrack(payload);
-    const previous = store.detections[detection.id];
-    store.upsertDetection(detection);
+    const valueType = getDynamicUpdateValueType(payload);
+    if (valueType === 'ValueTypeEnum_TRACK') {
+      const detection = applyPendingDataProducts(parseDynamicTrack(payload));
+      const previous = store.detections[detection.id];
+      store.upsertDetection(detection);
 
-    if (!previous) {
-      store.addEvent({
-        level: 'INFO',
-        message: `Detection acquired: ${detection.name} ${detection.id}`,
-        payload,
-      });
-    } else if (!previous.rtspUrl && detection.rtspUrl) {
-      store.addEvent({
-        level: 'INFO',
-        message: `Detection video available: ${detection.name} ${detection.id}`,
-        payload,
-      });
+      if (!previous) {
+        store.addEvent({
+          level: 'INFO',
+          message: `Detection acquired: ${detection.name} ${detection.id}`,
+          payload,
+        });
+      } else if (!previous.rtspUrl && detection.rtspUrl) {
+        store.addEvent({
+          level: 'INFO',
+          message: `Detection video available: ${detection.name} ${detection.id}`,
+          payload,
+        });
+      }
+      return;
     }
+
+    if (valueType === 'ValueTypeEnum_DATA_PRODUCT') {
+      dispatchDataProduct(parseDynamicDataProduct(payload), payload);
+      return;
+    }
+
+    store.addEvent({ level: 'WARN', message: `Unsupported DYNAMIC_UPDATE value: ${valueType}`, payload });
   } catch (error) {
     store.addEvent({
       level: 'WARN',
@@ -78,6 +96,80 @@ function dispatchDynamicUpdate(payload: unknown): void {
       payload,
     });
   }
+}
+
+function dispatchDataProduct(dataProduct: ParsedDataProduct, payload: unknown): void {
+  const store = useAppStore.getState();
+  purgePendingDataProducts();
+
+  if (dataProduct.trackIds.length === 0) {
+    store.addEvent({
+      level: 'INFO',
+      message: `DATA_PRODUCT ${dataProduct.id} has no TRACK references`,
+      payload,
+    });
+    return;
+  }
+
+  let attachedCount = 0;
+  dataProduct.trackIds.forEach((trackId) => {
+    const detection = store.detections[trackId];
+    if (!detection) {
+      const pending = pendingDataProducts.get(trackId);
+      pendingDataProducts.set(trackId, {
+        products: mergeDataProducts(pending?.products ?? [], [dataProduct]),
+        expiresAt: Date.now() + PENDING_DATA_PRODUCT_TTL_MILLIS,
+      });
+      return;
+    }
+
+    store.upsertDetection(attachDataProducts(detection, [dataProduct]));
+    attachedCount += 1;
+  });
+
+  store.addEvent({
+    level: 'INFO',
+    message: attachedCount > 0
+      ? `DATA_PRODUCT ${dataProduct.id} attached to ${attachedCount} detection${attachedCount === 1 ? '' : 's'}`
+      : `DATA_PRODUCT ${dataProduct.id} buffered pending referenced TRACK`,
+    payload,
+  });
+}
+
+function applyPendingDataProducts(detection: Detection): Detection {
+  purgePendingDataProducts();
+  const pending = pendingDataProducts.get(detection.id);
+  if (!pending) return detection;
+  pendingDataProducts.delete(detection.id);
+  return attachDataProducts(detection, pending.products);
+}
+
+function attachDataProducts(detection: Detection, products: ParsedDataProduct[]): Detection {
+  const urls = [...new Set(products.flatMap((product) => product.urls))];
+  if (urls.length === 0) return detection;
+
+  const existingUrls = detection.rtspUrl
+    ? detection.rtspUrl.split(/\s*,\s*/).filter((url) => url.length > 0)
+    : [];
+  const combinedUrls = [...new Set([...existingUrls, ...urls])];
+
+  return {
+    ...detection,
+    rtspUrl: combinedUrls.join(', '),
+  };
+}
+
+function mergeDataProducts(existing: ParsedDataProduct[], incoming: ParsedDataProduct[]): ParsedDataProduct[] {
+  const byId = new Map(existing.map((product) => [product.id, product]));
+  incoming.forEach((product) => byId.set(product.id, product));
+  return Array.from(byId.values());
+}
+
+function purgePendingDataProducts(): void {
+  const now = Date.now();
+  pendingDataProducts.forEach((pending, trackId) => {
+    if (pending.expiresAt <= now) pendingDataProducts.delete(trackId);
+  });
 }
 
 function dispatchTaskAdmin(payload: unknown): void {
