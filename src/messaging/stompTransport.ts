@@ -6,6 +6,7 @@ import {
   resolveTaskAdminDestination,
 } from '../services/stanagAdapter';
 import { applyTaskDuration } from '../services/taskDuration';
+import { applyTaskEntityDescriptions } from '../services/taskEntityDescription';
 import { useAppStore } from '../state/useAppStore';
 import {
   dispatchMavlinkStreamStatus,
@@ -75,7 +76,14 @@ export class StompTransport implements MessageTransport {
   }
 
   async publishTask(task: DroneTask): Promise<void> {
-    const payload = applyTaskDuration(buildTaskAdminPush(this.configuration, task), task);
+    const drone = useAppStore.getState().drones[task.droneId];
+    if (!drone) throw new Error(`Unknown drone ${task.droneId}`);
+
+    const payload = applyTaskEntityDescriptions(
+      applyTaskDuration(buildTaskAdminPush(this.configuration, task), task),
+      drone.name,
+      task.type,
+    );
     this.publishTaskPayload(task, payload);
   }
 
