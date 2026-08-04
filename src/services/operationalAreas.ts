@@ -87,12 +87,19 @@ class OperationalAreaControl implements IControl {
         const url = new URL(area.path, `${globalThis.location.origin}${import.meta.env.BASE_URL}`).toString();
         const response = await fetch(url);
         if (!response.ok) throw new Error(`${area.title}: HTTP ${response.status} loading ${url}`);
-        const contentType = response.headers.get('content-type') ?? '';
-        if (!contentType.includes('json') && !contentType.includes('geo+json')) {
-          throw new Error(`${area.title}: expected GeoJSON but received ${contentType || 'unknown content type'} from ${url}`);
+
+        const text = await response.text();
+        let data: GeoJSON.FeatureCollection;
+        try {
+          data = JSON.parse(text) as GeoJSON.FeatureCollection;
+        } catch (error) {
+          const contentType = response.headers.get('content-type') ?? 'unknown content type';
+          throw new Error(`${area.title}: invalid GeoJSON from ${url} (${contentType}): ${formatError(error)}`);
         }
-        const data = await response.json() as GeoJSON.FeatureCollection;
-        if (data.type !== 'FeatureCollection') throw new Error(`${area.title}: expected a GeoJSON FeatureCollection`);
+
+        if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
+          throw new Error(`${area.title}: expected a GeoJSON FeatureCollection`);
+        }
         return { area, data };
       }));
 
@@ -100,7 +107,7 @@ class OperationalAreaControl implements IControl {
       this.loaded = true;
       this.setVisible(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = formatError(error);
       this.button.textContent = 'Area load failed';
       this.button.title = message;
       useAppStoreError(message);
@@ -222,6 +229,10 @@ class OperationalAreaControl implements IControl {
     this.button.textContent = visible ? 'Hide areas' : 'Show areas';
     this.button.dataset.active = String(visible);
   }
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function useAppStoreError(message: string): void {
