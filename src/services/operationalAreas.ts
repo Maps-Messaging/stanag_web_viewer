@@ -38,7 +38,6 @@ class OperationalAreaControl implements IControl {
   private loaded = false;
   private visible = false;
   private loading = false;
-  private popup?: maplibregl.Popup;
 
   onAdd(map: MapLibreMap): HTMLElement {
     this.map = map;
@@ -57,8 +56,6 @@ class OperationalAreaControl implements IControl {
   }
 
   onRemove(): void {
-    this.popup?.remove();
-    this.popup = undefined;
     this.container?.remove();
     this.container = undefined;
     this.button = undefined;
@@ -198,12 +195,6 @@ class OperationalAreaControl implements IControl {
         row.insertCell().textContent = String(value);
       });
       root.appendChild(table);
-
-      this.popup?.remove();
-      this.popup = new maplibregl.Popup({ closeButton: true, maxWidth: '360px' })
-        .setLngLat(event.lngLat)
-        .setDOMContent(root)
-        .addTo(this.map);
     });
   }
 

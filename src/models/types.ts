@@ -91,14 +91,14 @@ export interface DroneTelemetryUpdate {
 }
 
 export type TaskType =
-  | 'REPOSITION'
-  | 'NAVIGATE'
-  | 'PATROL'
-  | 'LOITER'
-  | 'STANDBY'
-  | 'DETECT'
-  | 'SURVEY'
-  | 'SCREEN';
+    | 'REPOSITION'
+    | 'NAVIGATE'
+    | 'PATROL'
+    | 'LOITER'
+    | 'STANDBY'
+    | 'DETECT'
+    | 'SURVEY'
+    | 'SCREEN';
 
 export interface TaskDuration {
   hours: number;
@@ -106,31 +106,36 @@ export interface TaskDuration {
   seconds: number;
 }
 
+export interface TaskSchedule {
+  start: string;
+  end: string;
+}
+
 export type TaskGeometryType = 'POINT' | 'CIRCLE' | 'LINE' | 'RECTANGLE' | 'POLYGON' | 'CORRIDOR';
 export type TaskGeometry =
-  | { type: 'POINT'; point: GeoPoint }
-  | { type: 'CIRCLE'; centre: GeoPoint; radiusMeters: number }
-  | { type: 'LINE'; points: GeoPoint[] }
-  | { type: 'RECTANGLE'; points: GeoPoint[] }
-  | { type: 'POLYGON'; points: GeoPoint[] }
-  | { type: 'CORRIDOR'; centreLine: GeoPoint[]; widthMeters: number };
+    | { type: 'POINT'; point: GeoPoint }
+    | { type: 'CIRCLE'; centre: GeoPoint; radiusMeters: number }
+    | { type: 'LINE'; points: GeoPoint[] }
+    | { type: 'RECTANGLE'; points: GeoPoint[] }
+    | { type: 'POLYGON'; points: GeoPoint[] }
+    | { type: 'CORRIDOR'; centreLine: GeoPoint[]; widthMeters: number };
 
 export type TaskState =
-  | 'DRAFT'
-  | 'SUBMITTED'
-  | 'PENDING'
-  | 'ACCEPTED'
-  | 'ACTIVE'
-  | 'EXECUTING'
-  | 'CANCEL_REQUESTED'
-  | 'PREEMPTING'
-  | 'PREEMPTED'
-  | 'CANCELLED'
-  | 'COMPLETED'
-  | 'ABORTED'
-  | 'LOST'
-  | 'FAILED'
-  | 'REJECTED';
+    | 'DRAFT'
+    | 'SUBMITTED'
+    | 'PENDING'
+    | 'ACCEPTED'
+    | 'ACTIVE'
+    | 'EXECUTING'
+    | 'CANCEL_REQUESTED'
+    | 'PREEMPTING'
+    | 'PREEMPTED'
+    | 'CANCELLED'
+    | 'COMPLETED'
+    | 'ABORTED'
+    | 'LOST'
+    | 'FAILED'
+    | 'REJECTED';
 
 export interface DroneTask {
   id: string;
@@ -142,6 +147,9 @@ export interface DroneTask {
   point: GeoPoint;
   radiusMeters?: number;
   duration?: TaskDuration;
+  schedule?: TaskSchedule;
+  name?: string;
+  description?: string;
   state: TaskState;
   createdAt: number;
   updatedAt: number;

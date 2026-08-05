@@ -18,8 +18,8 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { MessageTransport } from '../messaging/transport';
-import type { DroneTask, GeoPoint, TaskDuration, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
-import { supportsDuration, validateTaskDuration } from '../services/taskDuration';
+import type { DroneTask, GeoPoint, TaskDuration, TaskGeometry, TaskGeometryType, TaskSchedule, TaskType } from '../models/types';
+import { validateTaskDuration } from '../services/taskDuration';
 import { createUuid } from '../services/uuid';
 import { useAppStore } from '../state/useAppStore';
 
@@ -41,6 +41,13 @@ const TASK_GEOMETRIES: Record<TaskType, TaskGeometryType[]> = {
   SCREEN: VOLUME_TASK_GEOMETRIES,
 };
 
+function currentLocalDateTime(): string {
+  const now = new Date();
+  now.setSeconds(0, 0);
+  const offset = now.getTimezoneOffset();
+  return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 16);
+}
+
 export function TaskPanel({ onClose, transport }: Props) {
   const selectedDroneId = useAppStore((state) => state.selectedDroneId);
   const selectedDrone = useAppStore(useShallow((state) => {
@@ -60,12 +67,16 @@ export function TaskPanel({ onClose, transport }: Props) {
   const [durationHours, setDurationHours] = useState('0');
   const [durationMinutes, setDurationMinutes] = useState('0');
   const [durationSeconds, setDurationSeconds] = useState('0');
+  const [startDateTime, setStartDateTime] = useState(currentLocalDateTime);
+  const [endDateTime, setEndDateTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     setDurationHours('0');
     setDurationMinutes('0');
     setDurationSeconds('0');
+    setStartDateTime(currentLocalDateTime());
+    setEndDateTime('');
   }, [selectedDroneId]);
 
   const supportedTaskTypes = useMemo(() => {
@@ -83,23 +94,47 @@ export function TaskPanel({ onClose, transport }: Props) {
   }, [clearDraftPoints, selectTaskType, supportedTaskTypes, taskType]);
 
   const capability = selectedDrone?.capabilities.find((candidate) => normaliseTaskType(candidate.taskType) === taskType);
+  // The first advertised authority GUID is currently used as header.source.
+  // A configurable source selector can replace this later without changing the task payload model.
   const authorityGuid = capability?.authorities[0];
   const allowedGeometries = taskType ? TASK_GEOMETRIES[taskType] : [];
   const effectiveGeometryType = taskType && allowedGeometries.includes(geometryType) ? geometryType : allowedGeometries[0];
   const geometryError = effectiveGeometryType
-    ? validateDraftGeometry(effectiveGeometryType, draftPoints.length, radius, corridorWidth)
-    : 'Choose a supported task type.';
-  const durationFieldErrors = durationErrors(durationHours, durationMinutes, durationSeconds);
+      ? validateDraftGeometry(effectiveGeometryType, draftPoints.length, radius, corridorWidth)
+      : 'Choose a supported task type.';
+  const hasEndDateTime = endDateTime.length > 0;
+  const durationFieldErrors = hasEndDateTime ? {} : durationErrors(durationHours, durationMinutes, durationSeconds);
   const durationError = Object.values(durationFieldErrors).find(Boolean);
+  const scheduleError = validateSchedule(startDateTime, endDateTime);
   const canSubmit = Boolean(
-    selectedDrone && taskType && authorityGuid && transport && effectiveGeometryType && !geometryError && !submitting
-      && (!supportsDuration(taskType) || !durationError),
+      selectedDrone && taskType && authorityGuid && transport && effectiveGeometryType && !geometryError && !submitting
+      && !durationError
+      && !scheduleError,
   );
 
   function chooseTask(type: TaskType): void {
     selectTaskType(type);
     setGeometryType(TASK_GEOMETRIES[type][0]);
     clearDraftPoints();
+    setStartDateTime(currentLocalDateTime());
+    setEndDateTime('');
+    setDurationHours('0');
+    setDurationMinutes('0');
+    setDurationSeconds('0');
+  }
+
+  function updateStartDateTime(value: string): void {
+    setStartDateTime(value);
+    if (value.length === 0) setEndDateTime('');
+  }
+
+  function updateEndDateTime(value: string): void {
+    setEndDateTime(value);
+    if (value.length > 0) {
+      setDurationHours('0');
+      setDurationMinutes('0');
+      setDurationSeconds('0');
+    }
   }
 
   function close(): void {
@@ -110,21 +145,28 @@ export function TaskPanel({ onClose, transport }: Props) {
 
   async function submit(): Promise<void> {
     if (!selectedDrone || !taskType || !authorityGuid || !transport || !effectiveGeometryType || geometryError) return;
-    if (supportsDuration(taskType) && durationError) return;
+    if (durationError) return;
+    if (scheduleError) return;
 
     const geometry = buildGeometry(effectiveGeometryType, draftPoints, altitude, radius, corridorWidth);
     const summary = geometrySummary(geometry);
-    const duration = supportsDuration(taskType) ? parseTaskDuration(durationHours, durationMinutes, durationSeconds) : undefined;
+    const duration = !hasEndDateTime
+        ? parseTaskDuration(durationHours, durationMinutes, durationSeconds)
+        : undefined;
+    const schedule = hasEndDateTime ? buildSchedule(startDateTime, endDateTime) : undefined;
     const task: DroneTask = {
       id: createUuid(),
       droneId: selectedDrone.id,
       authorityGuid,
       type: taskType,
+      name: `${taskType}-${selectedDrone.name}`,
+      description: 'Maps Messaging Demo UI',
       geometry,
       geometryType: geometry.type,
       point: summary.point,
       radiusMeters: summary.radiusMeters,
       ...(duration && totalDurationSeconds(duration) > 0 ? { duration } : {}),
+      ...(schedule ? { schedule } : {}),
       state: 'SUBMITTED',
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -143,104 +185,140 @@ export function TaskPanel({ onClose, transport }: Props) {
   }
 
   return (
-    <Paper square sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <Box sx={{ px: 1.5, py: 1.25, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Tooltip title="Back to vehicles">
-          <IconButton size="small" onClick={close} aria-label="Back to vehicles">
-            <ArrowBackIcon />
-          </IconButton>
-        </Tooltip>
-        <Box sx={{ minWidth: 0 }}>
-          <Typography variant="overline">Create task</Typography>
-          <Typography variant="subtitle1" noWrap>{selectedDrone?.name ?? 'No vehicle selected'}</Typography>
-        </Box>
-      </Box>
-
-      <Divider />
-
-      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 1.5 }}>
-        {!selectedDrone && <Alert severity="info">Select a vehicle before creating a task.</Alert>}
-        {selectedDrone && supportedTaskTypes.length === 0 && <Alert severity="info">This vehicle does not advertise any supported task capabilities.</Alert>}
-
-        {supportedTaskTypes.length > 0 && (
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.75, mb: 1.5 }}>
-            {supportedTaskTypes.map((type) => (
-              <Button
-                key={type}
-                size="small"
-                fullWidth
-                variant={taskType === type ? 'contained' : 'outlined'}
-                onClick={() => chooseTask(type)}
-                sx={{ minWidth: 0, px: 0.5 }}
-              >
-                {type}
-              </Button>
-            ))}
+      <Paper square sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Box sx={{ px: 1.5, py: 1.25, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Tooltip title="Back to vehicles">
+            <IconButton size="small" onClick={close} aria-label="Back to vehicles">
+              <ArrowBackIcon />
+            </IconButton>
+          </Tooltip>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="overline">Create task</Typography>
+            <Typography variant="subtitle1" noWrap>{selectedDrone?.name ?? 'No vehicle selected'}</Typography>
           </Box>
-        )}
+        </Box>
 
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-          {taskType && effectiveGeometryType ? geometryInstruction(effectiveGeometryType) : 'Choose an advertised task type, then select points on the map.'}
-        </Typography>
+        <Divider />
 
-        <Stack spacing={1.5}>
-          {taskType && allowedGeometries.length > 1 && effectiveGeometryType && (
-            <TextField
-              size="small"
-              select
-              fullWidth
-              label="Geometry"
-              value={effectiveGeometryType}
-              onChange={(event) => {
-                setGeometryType(event.target.value as TaskGeometryType);
-                clearDraftPoints();
-              }}
-            >
-              {allowedGeometries.map((type) => <MenuItem key={type} value={type}>{geometryLabel(type)}</MenuItem>)}
-            </TextField>
-          )}
+        <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 1.5 }}>
+          {!selectedDrone && <Alert severity="info">Select a vehicle before creating a task.</Alert>}
+          {selectedDrone && supportedTaskTypes.length === 0 && <Alert severity="info">This vehicle does not advertise any supported task capabilities.</Alert>}
 
-          {taskType && <TextField size="small" fullWidth label="Altitude (m)" type="number" value={altitude} onChange={(event) => setAltitude(Number(event.target.value))} />}
-          {effectiveGeometryType === 'CIRCLE' && <TextField size="small" fullWidth label="Radius (m)" type="number" value={radius} onChange={(event) => setRadius(Number(event.target.value))} inputProps={{ min: 1 }} />}
-          {effectiveGeometryType === 'CORRIDOR' && <TextField size="small" fullWidth label="Corridor width (m)" type="number" value={corridorWidth} onChange={(event) => setCorridorWidth(Number(event.target.value))} inputProps={{ min: 1 }} />}
-
-          {supportsDuration(taskType) && (
-            <Box>
-              <Typography variant="overline">Optional duration</Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 0.75 }}>
-                <DurationField label="Hours" value={durationHours} error={durationFieldErrors.hours} onChange={setDurationHours} />
-                <DurationField label="Minutes" value={durationMinutes} error={durationFieldErrors.minutes} onChange={setDurationMinutes} max={59} />
-                <DurationField label="Seconds" value={durationSeconds} error={durationFieldErrors.seconds} onChange={setDurationSeconds} max={59} />
+          {supportedTaskTypes.length > 0 && (
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.75, mb: 1.5 }}>
+                {supportedTaskTypes.map((type) => (
+                    <Button
+                        key={type}
+                        size="small"
+                        fullWidth
+                        variant={taskType === type ? 'contained' : 'outlined'}
+                        onClick={() => chooseTask(type)}
+                        sx={{ minWidth: 0, px: 0.5 }}
+                    >
+                      {type}
+                    </Button>
+                ))}
               </Box>
-              <Typography variant="caption" color="text.secondary">Leave all values at zero to omit duration.</Typography>
-            </Box>
           )}
 
-          {taskType && (
-            <Box>
-              <Typography variant="body2">Selected map points: {draftPoints.length}</Typography>
-              {draftPoints.length > 0 && (
-                <Typography variant="caption" color="text.secondary">
-                  Use Undo to remove the last point or Clear to restart the geometry.
-                </Typography>
-              )}
-            </Box>
-          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            {taskType && effectiveGeometryType ? geometryInstruction(effectiveGeometryType) : 'Choose an advertised task type, then select points on the map.'}
+          </Typography>
 
-          {taskType && !authorityGuid && selectedDrone && <Alert severity="warning">No authority GUID is advertised for {taskType}.</Alert>}
-          {taskType && geometryError && draftPoints.length > 0 && <Alert severity="info">{geometryError}</Alert>}
-        </Stack>
-      </Box>
+          <Stack spacing={1.5}>
+            {taskType && allowedGeometries.length > 1 && effectiveGeometryType && (
+                <TextField
+                    size="small"
+                    select
+                    fullWidth
+                    label="Geometry"
+                    value={effectiveGeometryType}
+                    onChange={(event) => {
+                      setGeometryType(event.target.value as TaskGeometryType);
+                      clearDraftPoints();
+                    }}
+                >
+                  {allowedGeometries.map((type) => <MenuItem key={type} value={type}>{geometryLabel(type)}</MenuItem>)}
+                </TextField>
+            )}
 
-      <Divider />
-      <Box sx={{ p: 1.25, display: 'grid', gridTemplateColumns: 'auto auto minmax(0, 1fr)', gap: 0.75 }}>
-        <Button size="small" startIcon={<UndoIcon />} onClick={undoDraftPoint} disabled={draftPoints.length === 0}>Undo</Button>
-        <Button size="small" startIcon={<DeleteSweepIcon />} onClick={clearDraftPoints} disabled={draftPoints.length === 0}>Clear</Button>
-        <Button size="small" fullWidth variant="contained" startIcon={<SendIcon />} disabled={!canSubmit} onClick={() => void submit()}>
-          {submitting ? 'Publishing…' : 'Submit'}
-        </Button>
-      </Box>
-    </Paper>
+            {taskType && <TextField size="small" fullWidth label="Altitude (m)" type="number" value={altitude} onChange={(event) => setAltitude(Number(event.target.value))} />}
+            {effectiveGeometryType === 'CIRCLE' && <TextField size="small" fullWidth label="Radius (m)" type="number" value={radius} onChange={(event) => setRadius(Number(event.target.value))} inputProps={{ min: 1 }} />}
+            {effectiveGeometryType === 'CORRIDOR' && <TextField size="small" fullWidth label="Corridor width (m)" type="number" value={corridorWidth} onChange={(event) => setCorridorWidth(Number(event.target.value))} inputProps={{ min: 1 }} />}
+
+            {taskType && (
+                <Box>
+                  <Typography variant="overline">Optional duration</Typography>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 0.75 }}>
+                    <DurationField label="Hours" value={durationHours} error={durationFieldErrors.hours} onChange={setDurationHours} disabled={hasEndDateTime} />
+                    <DurationField label="Minutes" value={durationMinutes} error={durationFieldErrors.minutes} onChange={setDurationMinutes} max={59} disabled={hasEndDateTime} />
+                    <DurationField label="Seconds" value={durationSeconds} error={durationFieldErrors.seconds} onChange={setDurationSeconds} max={59} disabled={hasEndDateTime} />
+                  </Box>
+                  <Typography variant="caption" color="text.secondary">
+                    {hasEndDateTime
+                        ? 'Duration is disabled because an explicit End time is set.'
+                        : 'The task starts at Start and runs for this duration. Leave all values at zero for no explicit duration.'}
+                  </Typography>
+                </Box>
+            )}
+
+            {taskType && (
+                <Box>
+                  <Typography variant="overline">Optional schedule</Typography>
+                  <Stack spacing={1}>
+                    <TextField
+                        size="small"
+                        fullWidth
+                        label="Start"
+                        type="datetime-local"
+                        value={startDateTime}
+                        onChange={(event) => updateStartDateTime(event.target.value)}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                    />
+                    <TextField
+                        size="small"
+                        fullWidth
+                        label="End"
+                        type="datetime-local"
+                        value={endDateTime}
+                        disabled={startDateTime.length === 0}
+                        error={Boolean(scheduleError)}
+                        helperText={scheduleError}
+                        onChange={(event) => updateEndDateTime(event.target.value)}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                    />
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">
+                    Start defaults to now. Use Duration for a timed task, or enter End for an explicit time window.
+                  </Typography>
+                </Box>
+            )}
+
+            {taskType && (
+                <Box>
+                  <Typography variant="body2">Selected map points: {draftPoints.length}</Typography>
+                  {draftPoints.length > 0 && (
+                      <Typography variant="caption" color="text.secondary">
+                        Use Undo to remove the last point or Clear to restart the geometry.
+                      </Typography>
+                  )}
+                </Box>
+            )}
+
+            {taskType && !authorityGuid && selectedDrone && <Alert severity="warning">No authority GUID is advertised for {taskType}.</Alert>}
+            {taskType && geometryError && draftPoints.length > 0 && <Alert severity="info">{geometryError}</Alert>}
+          </Stack>
+        </Box>
+
+        <Divider />
+        <Box sx={{ p: 1.25, display: 'grid', gridTemplateColumns: 'auto auto minmax(0, 1fr)', gap: 0.75 }}>
+          <Button size="small" startIcon={<UndoIcon />} onClick={undoDraftPoint} disabled={draftPoints.length === 0}>Undo</Button>
+          <Button size="small" startIcon={<DeleteSweepIcon />} onClick={clearDraftPoints} disabled={draftPoints.length === 0}>Clear</Button>
+          <Button size="small" fullWidth variant="contained" startIcon={<SendIcon />} disabled={!canSubmit} onClick={() => void submit()}>
+            {submitting ? 'Publishing…' : 'Submit'}
+          </Button>
+        </Box>
+      </Paper>
   );
 }
 
@@ -249,21 +327,23 @@ interface DurationFieldProps {
   value: string;
   error?: string;
   max?: number;
+  disabled?: boolean;
   onChange: (value: string) => void;
 }
 
-function DurationField({ label, value, error, max, onChange }: DurationFieldProps) {
+function DurationField({ label, value, error, max, disabled, onChange }: DurationFieldProps) {
   return (
-    <TextField
-      size="small"
-      label={label}
-      type="number"
-      value={value}
-      error={Boolean(error)}
-      helperText={error}
-      onChange={(event) => onChange(event.target.value)}
-      inputProps={{ min: 0, max, step: 1, inputMode: 'numeric' }}
-    />
+      <TextField
+          size="small"
+          label={label}
+          type="number"
+          value={value}
+          error={Boolean(error)}
+          helperText={error}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          inputProps={{ min: 0, max, step: 1, inputMode: 'numeric' }}
+      />
   );
 }
 
@@ -292,6 +372,43 @@ function parseTaskDuration(hours: string, minutes: string, seconds: string): Tas
 
 function totalDurationSeconds(duration: TaskDuration): number {
   return duration.hours * 3600 + duration.minutes * 60 + duration.seconds;
+}
+
+function validateSchedule(start: string, end: string): string | undefined {
+  if (start.length === 0) return 'Start is required.';
+  const startMillis = new Date(start).getTime();
+  if (!Number.isFinite(startMillis)) return 'Start is not a valid date and time.';
+  if (end.length === 0) return undefined;
+
+  const endMillis = new Date(end).getTime();
+  if (!Number.isFinite(endMillis)) return 'End is not a valid date and time.';
+  if (endMillis <= startMillis) return 'End must be after Start.';
+  return undefined;
+}
+
+function buildSchedule(start: string, end: string): TaskSchedule {
+  return {
+    start: localDateTimeToIsoOffset(start),
+    end: localDateTimeToIsoOffset(end),
+  };
+}
+
+function localDateTimeToIsoOffset(value: string): string {
+  const date = new Date(value);
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, '0');
+  const offsetRemainder = String(absoluteOffset % 60).padStart(2, '0');
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${sign}${offsetHours}:${offsetRemainder}`;
 }
 
 function capitalise(value: string): string { return value.charAt(0).toUpperCase() + value.slice(1); }

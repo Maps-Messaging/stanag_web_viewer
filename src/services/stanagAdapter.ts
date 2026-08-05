@@ -149,14 +149,18 @@ function parseCapabilities(value: unknown): DroneCapability[] {
     const taskType = optionalString(capability?.task_type);
     if (!capability || !taskType) return [];
     const authorities = Array.isArray(capability.authorities)
-      ? capability.authorities.flatMap((authority) => {
+        ? capability.authorities.flatMap((authority) => {
           const authorityValue = optionalObject(authority);
           if (authorityValue?.$discriminator !== 'AuthorityTypeEnum_GUID') return [];
           const guid = optionalString(authorityValue.guid);
           return guid ? [guid] : [];
         })
-      : [];
-    return [{ taskType, taskSpecialization: optionalString(capability.task_specialization) ?? 'NONE', authorities }];
+        : [];
+    return [{
+      taskType: normaliseTaskType(taskType),
+      taskSpecialization: optionalString(capability.task_specialization) ?? 'NONE',
+      authorities,
+    }];
   });
 }
 
@@ -168,15 +172,21 @@ function normaliseHeading(value: number | undefined): number {
   return value === undefined ? 0 : (value % 360 + 360) % 360;
 }
 
+export function normaliseTaskType(value: string): string {
+  return value
+      .replace(/^PlanTaskTypeEnum_/, '')
+      .replace(/^PlanTaskType_/, '')
+      .replace(/^TaskTypeEnum_/, '');
+}
+
 export function buildTaskAdminPush(configuration: BrokerConfiguration, task: DroneTask): unknown {
   const timestamp = new Date().toISOString();
   return {
-    header: buildHeader(configuration, timestamp),
+    header: buildHeader(configuration, task.authorityGuid, timestamp),
     body: {
       action: 'TaskAdminActionEnum_PUSH',
       identifier: task.id,
       node: task.droneId,
-      authority: buildAuthority(task.authorityGuid),
       description: buildTaskDescription(task, timestamp),
     },
   };
@@ -185,12 +195,11 @@ export function buildTaskAdminPush(configuration: BrokerConfiguration, task: Dro
 export function buildTaskAdminCancel(configuration: BrokerConfiguration, task: DroneTask): unknown {
   const timestamp = new Date().toISOString();
   return {
-    header: buildHeader(configuration, timestamp),
+    header: buildHeader(configuration, task.authorityGuid, timestamp),
     body: {
       action: 'TaskAdminActionEnum_CANCEL',
       identifier: task.id,
       node: task.droneId,
-      authority: buildAuthority(task.authorityGuid),
     },
   };
 }
@@ -199,21 +208,18 @@ export function resolveTaskAdminDestination(template: string, droneId: string): 
   return template.replaceAll('{droneUuid}', droneId).replaceAll('{droneId}', droneId);
 }
 
-function buildHeader(configuration: BrokerConfiguration, timestamp: string): unknown {
+function buildHeader(configuration: BrokerConfiguration, sourceGuid: string, timestamp: string): unknown {
   return {
     message_type: 'MessageTypeEnum_TASK_ADMIN',
-    source: configuration.sourceUuid,
+    source: sourceGuid,
     time_sent: timestamp,
     version: configuration.stanagVersion,
   };
 }
 
-function buildAuthority(guid: string): unknown {
-  return { $discriminator: 'AuthorityTypeEnum_GUID', guid };
-}
-
 function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
   const discriminator = `TaskTypeEnum_${task.type}`;
+  const metadata = buildTaskMetadata(task);
 
   switch (task.type) {
     case 'REPOSITION':
@@ -221,6 +227,7 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
       return {
         $discriminator: discriminator,
         reposition: {
+          ...metadata,
           location: {
             identifier: createUuid(),
             timestamp,
@@ -234,19 +241,19 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
 
     case 'NAVIGATE': {
       const points = routePoints(task.geometry, 'NAVIGATE');
-      return { $discriminator: discriminator, navigate: { route: buildLabeledRoute(points, timestamp) } };
+      return { $discriminator: discriminator, navigate: { ...metadata, route: buildLabeledRoute(points, timestamp) } };
     }
 
     case 'PATROL':
       if (task.geometry.type === 'LINE' || task.geometry.type === 'POINT') {
         return {
           $discriminator: discriminator,
-          patrol: { route: buildLabeledRoute(routePoints(task.geometry, 'PATROL'), timestamp) },
+          patrol: { ...metadata, route: buildLabeledRoute(routePoints(task.geometry, 'PATROL'), timestamp) },
         };
       }
       return {
         $discriminator: discriminator,
-        patrol: { volume: buildLabeledVolume(task.geometry, timestamp) },
+        patrol: { ...metadata, volume: buildLabeledVolume(task.geometry, timestamp) },
       };
 
     case 'LOITER':
@@ -254,6 +261,7 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
         return {
           $discriminator: discriminator,
           loiter: {
+            ...metadata,
             pose: {
               identifier: createUuid(),
               timestamp,
@@ -262,15 +270,16 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
           },
         };
       }
-      return { $discriminator: discriminator, loiter: { volume: buildLabeledVolume(task.geometry, timestamp) } };
+      return { $discriminator: discriminator, loiter: { ...metadata, volume: buildLabeledVolume(task.geometry, timestamp) } };
 
     case 'STANDBY':
-      return { $discriminator: discriminator, standby: buildVolumeTask(task.geometry, timestamp) };
+      return { $discriminator: discriminator, standby: { ...metadata, ...buildVolumeTask(task.geometry, timestamp) } };
 
     case 'DETECT':
       return {
         $discriminator: discriminator,
         detect: {
+          ...metadata,
           sensor_type: 'SensingModeEnum_PASSIVE',
           ...buildVolumeTask(task.geometry, timestamp),
         },
@@ -280,14 +289,32 @@ function buildTaskDescription(task: DroneTask, timestamp: string): unknown {
       return {
         $discriminator: discriminator,
         survey: {
+          ...metadata,
           sensor_type: 'SensingModeEnum_PASSIVE',
           ...buildVolumeTask(task.geometry, timestamp),
         },
       };
 
     case 'SCREEN':
-      return { $discriminator: discriminator, screen: buildVolumeTask(task.geometry, timestamp) };
+      return { $discriminator: discriminator, screen: { ...metadata, ...buildVolumeTask(task.geometry, timestamp) } };
   }
+}
+
+function buildTaskMetadata(task: DroneTask): Record<string, unknown> {
+  return {
+    ...(task.name ? { name: task.name } : {}),
+    ...(task.description ? { description: task.description } : {}),
+    ...(task.schedule ? { time: task.schedule } : {}),
+    ...(task.duration ? { duration: formatIso8601Duration(task.duration) } : {}),
+  };
+}
+
+function formatIso8601Duration(duration: DroneTask['duration']): string {
+  if (!duration) return 'PT0S';
+  const hours = duration.hours > 0 ? `${duration.hours}H` : '';
+  const minutes = duration.minutes > 0 ? `${duration.minutes}M` : '';
+  const seconds = duration.seconds > 0 ? `${duration.seconds}S` : '';
+  return `PT${hours}${minutes}${seconds || (!hours && !minutes ? '0S' : '')}`;
 }
 
 function routePoints(geometry: TaskGeometry, taskType: string): GeoPoint[] {
@@ -357,14 +384,14 @@ function buildPositionUnion(point: GeoPoint): unknown {
 
 function buildGeometryPoint(point: GeoPoint): unknown {
   return point.altitude === undefined
-    ? { latitude: point.latitude, longitude: point.longitude }
-    : { latitude: point.latitude, longitude: point.longitude, altitude: point.altitude };
+      ? { latitude: point.latitude, longitude: point.longitude }
+      : { latitude: point.latitude, longitude: point.longitude, altitude: point.altitude };
 }
 
 function buildPositionValue(point: GeoPoint): unknown {
   return point.altitude === undefined
-    ? { latitude: point.latitude, longitude: point.longitude }
-    : {
+      ? { latitude: point.latitude, longitude: point.longitude }
+      : {
         latitude: point.latitude,
         longitude: point.longitude,
         altitude: [{ type: WGS_ALTITUDE_TYPE, value: point.altitude }],
@@ -386,26 +413,31 @@ export function parseTaskAdmin(payload: unknown): ParsedTaskAdmin {
 
   const actionValue = asString(body.action, 'body.action');
   const action = actionValue === 'TaskAdminActionEnum_PUSH'
-    ? 'PUSH'
-    : actionValue === 'TaskAdminActionEnum_CANCEL'
-      ? 'CANCEL'
-      : undefined;
+      ? 'PUSH'
+      : actionValue === 'TaskAdminActionEnum_CANCEL'
+          ? 'CANCEL'
+          : undefined;
   if (!action) throw new Error(`Unsupported task admin action: ${actionValue}`);
 
   const taskId = asString(body.identifier, 'body.identifier');
   const droneId = asString(body.node, 'body.node');
   const sourceNode = asString(header.source, 'header.source');
-  const authority = optionalObject(body.authority);
-  const authorityGuid = authority?.$discriminator === 'AuthorityTypeEnum_GUID'
-    ? optionalString(authority.guid)
-    : undefined;
+  const legacyAuthority = optionalObject(body.authority);
+  const authorityGuid = sourceNode || (
+      legacyAuthority?.$discriminator === 'AuthorityTypeEnum_GUID'
+          ? optionalString(legacyAuthority.guid)
+          : undefined
+  );
   if (action === 'CANCEL') return { action, taskId, droneId, sourceNode, authorityGuid };
 
   const description = asObject(body.description, 'body.description');
   const type = parseTaskType(asString(description.$discriminator, 'body.description.$discriminator'));
-  const geometry = parseTaskGeometry(type, description);
+  const taskValue = asObject(description[type.toLowerCase()], `body.description.${type.toLowerCase()}`);
+  const geometry = parseTaskGeometry(type, taskValue);
   const summary = geometrySummary(geometry);
   const createdAt = parseTimestamp(header.time_sent) ?? Date.now();
+  const schedule = parseTaskSchedule(taskValue.time);
+  const duration = parseIso8601Duration(optionalString(taskValue.duration));
 
   return {
     action,
@@ -422,6 +454,10 @@ export function parseTaskAdmin(payload: unknown): ParsedTaskAdmin {
       geometryType: geometry.type,
       point: summary.point,
       radiusMeters: summary.radiusMeters,
+      schedule,
+      duration,
+      name: optionalString(taskValue.name),
+      description: optionalString(taskValue.description),
       state: 'SUBMITTED',
       createdAt,
       updatedAt: Date.now(),
@@ -430,8 +466,31 @@ export function parseTaskAdmin(payload: unknown): ParsedTaskAdmin {
   };
 }
 
+function parseTaskSchedule(value: unknown): DroneTask['schedule'] {
+  if (value === undefined) return undefined;
+  const time = asObject(value, 'task.time');
+  const start = asString(time.start, 'task.time.start');
+  const end = asString(time.end, 'task.time.end');
+  const startMillis = Date.parse(start);
+  const endMillis = Date.parse(end);
+  if (Number.isNaN(startMillis) || Number.isNaN(endMillis)) throw new Error('Task time contains an invalid ISO-8601 timestamp');
+  if (endMillis <= startMillis) throw new Error('Task time end must be after start');
+  return { start, end };
+}
+
+function parseIso8601Duration(value: string | undefined): DroneTask['duration'] {
+  if (!value) return undefined;
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(value);
+  if (!match) throw new Error(`Unsupported task duration: ${value}`);
+  return {
+    hours: Number(match[1] ?? 0),
+    minutes: Number(match[2] ?? 0),
+    seconds: Number(match[3] ?? 0),
+  };
+}
+
 function parseTaskType(value: string): TaskType {
-  const type = value.replace('TaskTypeEnum_', '');
+  const type = normaliseTaskType(value);
   switch (type) {
     case 'REPOSITION':
     case 'NAVIGATE':
@@ -447,9 +506,7 @@ function parseTaskType(value: string): TaskType {
   }
 }
 
-function parseTaskGeometry(type: TaskType, description: Record<string, unknown>): TaskGeometry {
-  const taskValue = asObject(description[type.toLowerCase()], `body.description.${type.toLowerCase()}`);
-
+function parseTaskGeometry(type: TaskType, taskValue: Record<string, unknown>): TaskGeometry {
   switch (type) {
     case 'REPOSITION': {
       const labeledLocation = asObject(taskValue.location, 'reposition.location');
@@ -648,7 +705,8 @@ function mapTaskState(state: string): TaskState {
     case 'TaskStateEnum_ACCEPTED': return 'ACCEPTED';
     case 'TaskStateEnum_ACTIVE': return 'ACTIVE';
     case 'TaskStateEnum_SUCCEEDED': return 'COMPLETED';
-    case 'TaskStateEnum_PREEMPTING': return 'PREEMPTING';
+    case 'TaskStateEnum_PREEMPTING':
+    case 'TaskStateEnum_RECALLING': return 'PREEMPTING';
     case 'TaskStateEnum_PREEMPTED': return 'PREEMPTED';
     case 'TaskStateEnum_RECALLED':
     case 'TaskStateEnum_CANCELLED':
