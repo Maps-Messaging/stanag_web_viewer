@@ -302,7 +302,6 @@ export function dispatchTwinMessage(payload: unknown): void {
   const groundSpeed = numberValue(payload.groundSpeedMetersPerSecond);
   const climbRate = numberValue(payload.verticalSpeedMetersPerSecond);
   const course = calculateCourseDegrees(velocityVector) ?? heading;
-  const lastSeen = parseTimestamp(payload.lastSeenAt) ?? Date.now();
 
   const telemetry: DroneTelemetryUpdate = removeUndefinedValues({
     position: buildPosition(geoPosition),
@@ -313,7 +312,7 @@ export function dispatchTwinMessage(payload: unknown): void {
     groundSpeed,
     course,
     climbRate,
-    lastSeen,
+    lastSeen: Date.now(),
     twin: payload as TwinState,
   });
 
