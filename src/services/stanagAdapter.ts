@@ -438,6 +438,7 @@ export function parseTaskAdmin(payload: unknown): ParsedTaskAdmin {
   const createdAt = parseTimestamp(header.time_sent) ?? Date.now();
   const schedule = parseTaskSchedule(taskValue.time);
   const duration = parseIso8601Duration(optionalString(taskValue.duration));
+  const state: TaskState = schedule && Date.parse(schedule.start) > Date.now() ? 'SCHEDULED' : 'SUBMITTED';
 
   return {
     action,
@@ -458,7 +459,7 @@ export function parseTaskAdmin(payload: unknown): ParsedTaskAdmin {
       duration,
       name: optionalString(taskValue.name),
       description: optionalString(taskValue.description),
-      state: 'SUBMITTED',
+      state,
       createdAt,
       updatedAt: Date.now(),
       sourceNode,

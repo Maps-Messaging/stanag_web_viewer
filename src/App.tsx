@@ -11,6 +11,7 @@ import type { MessageTransport } from './messaging/transport';
 import type { BrokerConfiguration } from './models/types';
 import { buildNamedValueFloatEvent, namedValueFloatTopic } from './services/mavlinkEvents';
 import { TELEMETRY_STALE_MILLIS } from './services/operationalState';
+import { getAllStanagTasks } from './services/stanagTaskRestClient';
 import { useAppStore } from './state/useAppStore';
 
 const DETECTION_NAME = 'DETECT';
@@ -59,9 +60,9 @@ export default function App() {
       if (generation !== connectionGenerationRef.current) throw new Error('Connection attempt was superseded');
 
       await withTimeout(
-        nextTransport.connect(),
-        CONNECTION_TIMEOUT_MILLIS,
-        `Connection timed out after ${CONNECTION_TIMEOUT_MILLIS / 1_000} seconds`,
+          nextTransport.connect(),
+          CONNECTION_TIMEOUT_MILLIS,
+          `Connection timed out after ${CONNECTION_TIMEOUT_MILLIS / 1_000} seconds`,
       );
 
       if (generation !== connectionGenerationRef.current) {
@@ -71,6 +72,7 @@ export default function App() {
 
       transportRef.current = nextTransport;
       setTransport(nextTransport);
+      await loadCurrentAndFutureTasks(nextConfiguration, generation);
     } catch (error) {
       await nextTransport?.disconnect().catch(() => undefined);
       if (generation === connectionGenerationRef.current) {
@@ -97,6 +99,23 @@ export default function App() {
     }, DETECTION_EXPIRY_CHECK_MILLIS);
     return () => globalThis.clearInterval(timer);
   }, []);
+
+  async function loadCurrentAndFutureTasks(nextConfiguration: BrokerConfiguration, generation: number): Promise<void> {
+    try {
+      const tasks = await getAllStanagTasks(nextConfiguration);
+      if (generation !== connectionGenerationRef.current) return;
+
+      const store = useAppStore.getState();
+      tasks.forEach((task) => store.upsertTask(task));
+      store.addEvent({
+        level: 'INFO',
+        message: `Loaded ${tasks.length} active and future STANAG task${tasks.length === 1 ? '' : 's'} from REST`,
+      });
+    } catch (error) {
+      if (generation !== connectionGenerationRef.current) return;
+      addEvent({ level: 'WARN', message: `Unable to load STANAG tasks from REST: ${String(error)}` });
+    }
+  }
 
   async function applySettings(nextConfiguration: BrokerConfiguration): Promise<void> {
     await connect(nextConfiguration);
@@ -136,28 +155,28 @@ export default function App() {
   }
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <div className="app-shell">
-        <ConnectionBar onOpenSettings={() => setSettingsOpen(true)} />
-        <main className="workspace">
-          <aside className="drone-list">
-            {taskEditorOpen ? (
-              <TaskPanel onClose={() => setTaskEditorOpen(false)} transport={transport} />
-            ) : (
-              <DroneList
-                onDetect={detectDrone}
-                onAddTask={() => setTaskEditorOpen(true)}
-                transport={transport}
-              />
-            )}
-          </aside>
-          <section className="map-panel"><MapView /></section>
-          <section className="event-log"><EventLog /></section>
-        </main>
-      </div>
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onApply={applySettings} />
-    </ThemeProvider>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <div className="app-shell">
+          <ConnectionBar onOpenSettings={() => setSettingsOpen(true)} />
+          <main className="workspace">
+            <aside className="drone-list">
+              {taskEditorOpen ? (
+                  <TaskPanel onClose={() => setTaskEditorOpen(false)} transport={transport} />
+              ) : (
+                  <DroneList
+                      onDetect={detectDrone}
+                      onAddTask={() => setTaskEditorOpen(true)}
+                      transport={transport}
+                  />
+              )}
+            </aside>
+            <section className="map-panel"><MapView /></section>
+            <section className="event-log"><EventLog /></section>
+          </main>
+        </div>
+        <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onApply={applySettings} />
+      </ThemeProvider>
   );
 }
 
@@ -169,14 +188,14 @@ function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: stri
   return new Promise<T>((resolve, reject) => {
     const timer = globalThis.setTimeout(() => reject(new Error(message)), milliseconds);
     promise.then(
-      (value) => {
-        globalThis.clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        globalThis.clearTimeout(timer);
-        reject(error);
-      },
+        (value) => {
+          globalThis.clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          globalThis.clearTimeout(timer);
+          reject(error);
+        },
     );
   });
 }

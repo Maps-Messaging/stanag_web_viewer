@@ -51,12 +51,23 @@ const configuredTransport = (env.VITE_TRANSPORT ?? 'stomp') as BrokerConfigurati
 const transportBrokerUrl = configuredTransport === 'mqtt'
     ? env.VITE_MQTT_BROKER_URL
     : env.VITE_STOMP_BROKER_URL;
+const configuredRestPort = env.VITE_REST_PORT;
+
+const defaultRestApiUrl =
+    env.VITE_REST_API_URL ??
+    (import.meta.env.DEV
+        ? `http://${globalThis.location.hostname}:8080/api/v1`
+        : `${globalThis.location.origin}/api/v1`);
+
 
 localStorage.setItem('stanag-demo-source-uuid', storedSourceUuid);
+
+
 
 const initialConfiguration: BrokerConfiguration = {
     transport: configuredTransport,
     brokerUrl: transportBrokerUrl ?? env.VITE_BROKER_URL ?? defaultBrokerUrl(configuredTransport),
+    restApiUrl: defaultRestApiUrl,
     username: env.VITE_USERNAME ?? '',
     password: env.VITE_PASSWORD ?? '',
     droneTopic: env.VITE_DRONE_TOPIC ?? '4817/catl/maps/json/+/+',

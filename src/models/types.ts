@@ -123,6 +123,7 @@ export type TaskGeometry =
 export type TaskState =
     | 'DRAFT'
     | 'SUBMITTED'
+    | 'SCHEDULED'
     | 'PENDING'
     | 'ACCEPTED'
     | 'ACTIVE'
@@ -161,6 +162,14 @@ export interface DroneTask {
 export interface EventLogEntry { id: string; timestamp: number; level: 'INFO' | 'WARN' | 'ERROR'; message: string; payload?: unknown; }
 
 export interface BrokerConfiguration {
-  transport: TransportKind; brokerUrl: string; username: string; password: string; droneTopic: string; taskStatusTopic: string;
-  taskAdminTopic: string; sourceUuid: string; stanagVersion: string;
+  transport: TransportKind;
+  brokerUrl: string;
+  restApiUrl: string;
+  username: string;
+  password: string;
+  droneTopic: string;
+  taskStatusTopic: string;
+  taskAdminTopic: string;
+  sourceUuid: string;
+  stanagVersion: string;
 }
