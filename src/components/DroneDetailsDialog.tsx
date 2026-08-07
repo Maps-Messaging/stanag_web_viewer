@@ -98,15 +98,21 @@ export function DroneDetailsDialog({
     }
 
     async function resendTask(task: DroneTask): Promise<void> {
+        if (!drone) {
+            addEvent({level: 'ERROR', message: `REST task resend failed: no drone is currently selected for task ${task.id}`, payload: task,});
+            return;
+        }
+
         setResendingTaskId(task.id);
         setTaskError(undefined);
+
         try {
             await resendStanagTask(configuration, task.id, drone.id);
-            addEvent({ level: 'WARN', message: `REST resend requested for active task ${task.id}; the complete task plan is being resent from the beginning`, payload: task });
+            addEvent({level: 'WARN', message: `REST resend requested for active task ${task.id}; the complete task plan is being resent from the beginning`, payload: task,});
         } catch (error) {
             const message = String(error);
             setTaskError(message);
-            addEvent({ level: 'ERROR', message: `REST task resend failed: ${message}`, payload: task });
+            addEvent({level: 'ERROR', message: `REST task resend failed: ${message}`, payload: task,});
         } finally {
             setResendingTaskId(undefined);
         }
