@@ -37,9 +37,18 @@ export async function deleteStanagTask(configuration: BrokerConfiguration, taskI
     throw new Error(await responseError(response, `Unable to cancel STANAG task ${taskId}`));
 }
 
-function buildTaskUrl(configuration: BrokerConfiguration, taskId?: string): string {
+export async function resendStanagTask(configuration: BrokerConfiguration, taskId: string, droneId: string): Promise<void> {
+    const response = await fetch(buildTaskUrl(configuration, taskId, 'resend', droneId), {
+        method: 'POST',
+        headers: buildHeaders(configuration),
+    });
+    if (response.status === 202 || response.status === 200 || response.status === 204) return;
+    throw new Error(await responseError(response, `Unable to resend STANAG task ${taskId}`));
+}
+
+function buildTaskUrl(configuration: BrokerConfiguration, ...pathSegments: string[]): string {
     const baseUrl = configuration.restApiUrl.replace(/\/+$/, '');
-    const path = taskId ? `${TASK_PATH}/${encodeURIComponent(taskId)}` : TASK_PATH;
+    const path = [TASK_PATH, ...pathSegments.map((segment) => encodeURIComponent(segment))].join('/');
     return `${baseUrl}/${path}`;
 }
 
