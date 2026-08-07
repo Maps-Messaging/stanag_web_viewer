@@ -46,7 +46,7 @@ export function DroneList({ onDetect, onAddTask, transport }: DroneListProps) {
     return droneIds
       .filter((id) => {
         const drone = state.drones[id];
-        return !query || id.toLowerCase().includes(query) || drone?.name.toLowerCase().includes(query) || drone?.twin?.callSign?.toLowerCase().includes(query);
+        return !query || id.toLowerCase().includes(query) || drone?.name.toLowerCase().includes(query) || drone?.twin?.callSign?.toLowerCase().includes(query) || drone?.twin?.lastStatusText?.toLowerCase().includes(query);
       })
       .sort((leftId, rightId) => {
         const left = state.drones[leftId];
@@ -65,7 +65,7 @@ export function DroneList({ onDetect, onAddTask, transport }: DroneListProps) {
       <Paper square sx={{ height: '100%', overflow: 'auto' }}>
         <Box sx={{ px: 2, py: 1.5 }}>
           <Typography variant="overline">Vehicles</Typography>
-          <TextField size="small" fullWidth placeholder="Search name, UUID or call sign" value={search} onChange={(event) => setSearch(event.target.value)} sx={{ mt: 1 }} />
+          <TextField size="small" fullWidth placeholder="Search name, UUID, call sign or status" value={search} onChange={(event) => setSearch(event.target.value)} sx={{ mt: 1 }} />
         </Box>
 
         <List disablePadding>
@@ -115,6 +115,7 @@ const DroneListItem = memo(function DroneListItem({
       lastSeen: drone.lastSeen,
       stale: drone.stale,
       systemId: drone.twin?.systemId,
+      statusText: drone.twin?.lastStatusText,
       streamStatus: drone.mavlinkStreamStatus?.status,
       hasStreamStatus: drone.mavlinkStreamStatus !== undefined,
       capabilities: drone.capabilities.length,
@@ -192,6 +193,14 @@ const DroneListItem = memo(function DroneListItem({
             </IconButton>
           </Tooltip>
         </Stack>
+
+        {row.statusText && (
+          <Tooltip title={row.statusText} placement="top-start">
+            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', mt: 0.25 }}>
+              {row.statusText}
+            </Typography>
+          </Tooltip>
+        )}
 
         <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" sx={{ mt: 0.75 }}>
           {row.symbolSet && <Chip size="small" label={shortEnum(row.symbolSet)} />}

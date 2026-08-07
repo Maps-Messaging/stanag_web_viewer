@@ -43,7 +43,7 @@ export interface TwinState {
   registrationReady?: boolean; commandReady?: boolean; missingReadinessItems?: string[]; degradedReadinessItems?: string[];
   blockingReadinessItems?: string[]; headingDegrees?: number; groundSpeedMetersPerSecond?: number; verticalSpeedMetersPerSecond?: number;
   batteryCapacityHours?: number; stopAction?: string; operationalUpdatedAt?: string; readinessUpdatedAt?: string; lastSeenAt?: string;
-  validTill?: string; geoPosition?: TwinGeoPosition; homePosition?: TwinHomePosition; velocityVector?: TwinVelocityVector;
+  lastStatusText?: string; validTill?: string; geoPosition?: TwinGeoPosition; homePosition?: TwinHomePosition; velocityVector?: TwinVelocityVector;
   orientation?: TwinOrientation; fixInfo?: TwinFixInfo; batteryState?: TwinBatteryState; linkState?: TwinLinkState;
   systemState?: TwinSystemState; autopilotState?: TwinAutopilotState; capabilities?: unknown; description?: unknown;
   relationships?: unknown[]; attributes?: Record<string, unknown>; [key: string]: unknown;
