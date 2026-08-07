@@ -7,11 +7,13 @@ import {
 } from '../services/dynamicUpdateAdapter';
 import { mergePercentComplete, shouldApplyTaskState } from '../services/operationalState';
 import { getStanagMessageType, parseNodeMessage, parseTaskAdmin, parseTaskStatus, type ParsedTaskStatus } from '../services/stanagAdapter';
+import { getStanagTask } from '../services/stanagTaskRestClient';
 import { useAppStore } from '../state/useAppStore';
 
 const PENDING_TASK_STATUS_TTL_MILLIS = 30_000;
 const PENDING_DATA_PRODUCT_TTL_MILLIS = 2 * 60 * 1000;
-const pendingTaskStatuses = new Map<string, { status: ParsedTaskStatus; expiresAt: number }>();
+const unresolvedTaskStatuses = new Map<string, { status: ParsedTaskStatus; payload: unknown; expiresAt: number }>();
+const taskDetailRequests = new Set<string>();
 const pendingDataProducts = new Map<string, { products: ParsedDataProduct[]; expiresAt: number }>();
 
 export function dispatchStanagMessage(payload: unknown): void {
@@ -130,8 +132,8 @@ function dispatchDataProduct(dataProduct: ParsedDataProduct, payload: unknown): 
   store.addEvent({
     level: 'INFO',
     message: attachedCount > 0
-      ? `DATA_PRODUCT ${dataProduct.id} attached to ${attachedCount} detection${attachedCount === 1 ? '' : 's'}`
-      : `DATA_PRODUCT ${dataProduct.id} buffered pending referenced TRACK`,
+        ? `DATA_PRODUCT ${dataProduct.id} attached to ${attachedCount} detection${attachedCount === 1 ? '' : 's'}`
+        : `DATA_PRODUCT ${dataProduct.id} buffered pending referenced TRACK`,
     payload,
   });
 }
@@ -149,8 +151,8 @@ function attachDataProducts(detection: Detection, products: ParsedDataProduct[])
   if (urls.length === 0) return detection;
 
   const existingUrls = detection.rtspUrl
-    ? detection.rtspUrl.split(/\s*,\s*/).filter((url) => url.length > 0)
-    : [];
+      ? detection.rtspUrl.split(/\s*,\s*/).filter((url) => url.length > 0)
+      : [];
   const combinedUrls = [...new Set([...existingUrls, ...urls])];
 
   return {
@@ -178,10 +180,10 @@ function dispatchTaskAdmin(payload: unknown): void {
 
   if (admin.action === 'PUSH' && admin.task) {
     store.upsertTask(withDisplayFields(admin.task));
-    const pending = pendingTaskStatuses.get(admin.taskId);
+    const pending = unresolvedTaskStatuses.get(admin.taskId);
     if (pending && pending.expiresAt > Date.now() && pending.status.droneId === admin.droneId) {
-      pendingTaskStatuses.delete(admin.taskId);
-      applyTaskStatus(pending.status, payload);
+      unresolvedTaskStatuses.delete(admin.taskId);
+      applyTaskStatus(pending.status, pending.payload);
     }
     store.addEvent({
       level: 'INFO',
@@ -211,18 +213,66 @@ function dispatchTaskAdmin(payload: unknown): void {
 
 function dispatchTaskStatus(payload: unknown): void {
   const status = parseTaskStatus(payload);
-  const existing = useAppStore.getState().tasks[status.taskId];
-  if (!existing) {
-    purgePendingTaskStatuses();
-    pendingTaskStatuses.set(status.taskId, { status, expiresAt: Date.now() + PENDING_TASK_STATUS_TTL_MILLIS });
-    useAppStore.getState().addEvent({
-      level: 'INFO',
-      message: `${status.messageType} buffered pending TASK_ADMIN for ${status.taskId}`,
-      payload,
-    });
+  const store = useAppStore.getState();
+  const existing = store.tasks[status.taskId];
+
+  if (existing) {
+    applyTaskStatus(status, payload);
     return;
   }
-  applyTaskStatus(status, payload);
+
+  purgeUnresolvedTaskStatuses();
+  unresolvedTaskStatuses.set(status.taskId, {
+    status,
+    payload,
+    expiresAt: Date.now() + PENDING_TASK_STATUS_TTL_MILLIS,
+  });
+
+  if (taskDetailRequests.has(status.taskId)) return;
+
+  store.addEvent({
+    level: 'INFO',
+    message: `${status.messageType} received for a task not yet known to this UI; loading task details: ${status.taskId}`,
+    payload,
+  });
+
+  taskDetailRequests.add(status.taskId);
+  void resolveUnknownTask(status.taskId);
+}
+
+async function resolveUnknownTask(taskId: string): Promise<void> {
+  const store = useAppStore.getState();
+
+  try {
+    const task = await getStanagTask(store.configuration, taskId);
+    if (!task) {
+      store.addEvent({
+        level: 'WARN',
+        message: `Task update received for unknown task ${taskId}; task details are not currently available`,
+      });
+      return;
+    }
+
+    store.upsertTask(withDisplayFields(task));
+
+    const pending = unresolvedTaskStatuses.get(taskId);
+    if (pending && pending.expiresAt > Date.now()) {
+      unresolvedTaskStatuses.delete(taskId);
+      applyTaskStatus(pending.status, pending.payload);
+    }
+
+    store.addEvent({
+      level: 'INFO',
+      message: `Task details loaded for ${taskId}`,
+    });
+  } catch (error) {
+    store.addEvent({
+      level: 'WARN',
+      message: `Unable to load details for task ${taskId}: ${formatError(error)}`,
+    });
+  } finally {
+    taskDetailRequests.delete(taskId);
+  }
 }
 
 function applyTaskStatus(status: ParsedTaskStatus, payload: unknown): void {
@@ -257,16 +307,16 @@ function applyTaskStatus(status: ParsedTaskStatus, payload: unknown): void {
   store.addEvent({
     level: taskStatusLevel(status.state),
     message: `${status.messageType}: ${status.taskId} ${status.state}${
-      status.percentComplete === undefined ? '' : ` ${status.percentComplete.toFixed(1)}%`
+        status.percentComplete === undefined ? '' : ` ${status.percentComplete.toFixed(1)}%`
     }${status.message ? `: ${status.message}` : ''}`,
     payload,
   });
 }
 
-function purgePendingTaskStatuses(): void {
+function purgeUnresolvedTaskStatuses(): void {
   const now = Date.now();
-  pendingTaskStatuses.forEach((pending, taskId) => {
-    if (pending.expiresAt <= now) pendingTaskStatuses.delete(taskId);
+  unresolvedTaskStatuses.forEach((pending, taskId) => {
+    if (pending.expiresAt <= now) unresolvedTaskStatuses.delete(taskId);
   });
 }
 

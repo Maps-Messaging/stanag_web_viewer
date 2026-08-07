@@ -28,6 +28,30 @@ export async function getAllStanagTasks(configuration: BrokerConfiguration): Pro
     });
 }
 
+
+export async function getStanagTask(configuration: BrokerConfiguration, taskId: string): Promise<DroneTask | undefined> {
+    const response = await fetch(buildTaskUrl(configuration, taskId), {
+        method: 'GET',
+        headers: buildHeaders(configuration),
+    });
+
+    if (response.status === 404) return undefined;
+    if (!response.ok) throw new Error(await responseError(response, `Unable to load STANAG task ${taskId}`));
+
+    const payload = await parseJsonResponse(response);
+    const value = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    const parsed = parseTaskAdmin(value);
+    if (parsed.action !== 'PUSH' || !parsed.task) return undefined;
+
+    const now = Date.now();
+    const task = parsed.task;
+    return {
+        ...task,
+        state: task.schedule && Date.parse(task.schedule.start) > now ? 'SCHEDULED' : 'ACTIVE',
+        updatedAt: now,
+    };
+}
+
 export async function deleteStanagTask(configuration: BrokerConfiguration, taskId: string): Promise<void> {
     const response = await fetch(buildTaskUrl(configuration, taskId), {
         method: 'DELETE',
