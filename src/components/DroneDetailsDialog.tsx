@@ -1,5 +1,6 @@
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import ReplayIcon from '@mui/icons-material/Replay';
 import {
     Alert,
     Box,
@@ -18,7 +19,7 @@ import {
 } from '@mui/material';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Drone, DroneTask, TaskDuration, TwinState } from '../models/types';
-import { deleteStanagTask } from '../services/stanagTaskRestClient';
+import { deleteStanagTask, resendStanagTask } from '../services/stanagTaskRestClient';
 import { useAppStore } from '../state/useAppStore';
 import { AttitudeIndicator } from './AttitudeIndicator';
 
@@ -37,6 +38,7 @@ export function DroneDetailsDialog({
     const [copyMessage, setCopyMessage] = useState<string>();
     const [taskError, setTaskError] = useState<string>();
     const [deletingTaskId, setDeletingTaskId] = useState<string>();
+    const [resendingTaskId, setResendingTaskId] = useState<string>();
     const tasks = useAppStore((state) => state.tasks);
     const configuration = useAppStore((state) => state.configuration);
     const upsertTask = useAppStore((state) => state.upsertTask);
@@ -48,6 +50,7 @@ export function DroneDetailsDialog({
             setCopyMessage(undefined);
             setTaskError(undefined);
             setDeletingTaskId(undefined);
+            setResendingTaskId(undefined);
         }
     }, [open, drone?.id]);
 
@@ -91,6 +94,21 @@ export function DroneDetailsDialog({
             addEvent({ level: 'ERROR', message: `REST task cancellation failed: ${message}`, payload: task });
         } finally {
             setDeletingTaskId(undefined);
+        }
+    }
+
+    async function resendTask(task: DroneTask): Promise<void> {
+        setResendingTaskId(task.id);
+        setTaskError(undefined);
+        try {
+            await resendStanagTask(configuration, task.id, drone.id);
+            addEvent({ level: 'WARN', message: `REST resend requested for active task ${task.id}; the complete task plan is being resent from the beginning`, payload: task });
+        } catch (error) {
+            const message = String(error);
+            setTaskError(message);
+            addEvent({ level: 'ERROR', message: `REST task resend failed: ${message}`, payload: task });
+        } finally {
+            setResendingTaskId(undefined);
         }
     }
 
@@ -174,8 +192,10 @@ export function DroneDetailsDialog({
                     <TasksTab
                         tasks={droneTasks}
                         deletingTaskId={deletingTaskId}
+                        resendingTaskId={resendingTaskId}
                         error={taskError}
                         onDelete={(task) => void deleteTask(task)}
+                        onResend={(task) => void resendTask(task)}
                     />
                 )}
 
@@ -462,59 +482,123 @@ function CapabilitiesTab({
 function TasksTab({
                       tasks,
                       deletingTaskId,
+                      resendingTaskId,
                       error,
                       onDelete,
+                      onResend,
                   }: {
     tasks: DroneTask[];
     deletingTaskId?: string;
+    resendingTaskId?: string;
     error?: string;
     onDelete: (task: DroneTask) => void;
+    onResend: (task: DroneTask) => void;
 }) {
+    const [resendConfirmationTask, setResendConfirmationTask] = useState<DroneTask>();
+
     if (tasks.length === 0) {
         return <Alert severity="info">No active or future tasks are registered for this vehicle.</Alert>;
     }
 
     return (
-        <Stack spacing={2}>
-            {error && <Alert severity="error">{error}</Alert>}
-            {tasks.map((task) => (
-                <Box key={task.id} sx={{ p: 1.5, border: 1, borderColor: 'divider', borderRadius: 1 }}>
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ sm: 'center' }}>
-                        <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                            <Chip size="small" color="primary" label={task.type} />
-                            <Chip size="small" variant="outlined" label={task.state} />
-                            {isFutureTask(task) && <Chip size="small" color="info" variant="outlined" label="FUTURE" />}
+        <>
+            <Stack spacing={2}>
+                {error && <Alert severity="error">{error}</Alert>}
+                {tasks.map((task) => (
+                    <Box key={task.id} sx={{ p: 1.5, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ sm: 'center' }}>
+                            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                                <Chip size="small" color="primary" label={task.type} />
+                                <Chip size="small" variant="outlined" label={task.state} />
+                                {isFutureTask(task) && <Chip size="small" color="info" variant="outlined" label="FUTURE" />}
+                            </Stack>
+                            <Stack direction="row" spacing={0.75}>
+                                {task.state === 'ACTIVE' && (
+                                    <Button
+                                        size="small"
+                                        color="warning"
+                                        variant="outlined"
+                                        startIcon={<ReplayIcon />}
+                                        disabled={resendingTaskId === task.id || deletingTaskId === task.id}
+                                        onClick={() => setResendConfirmationTask(task)}
+                                    >
+                                        {resendingTaskId === task.id ? 'Resending…' : 'Resend'}
+                                    </Button>
+                                )}
+                                <Button
+                                    size="small"
+                                    color="error"
+                                    variant="outlined"
+                                    startIcon={<DeleteOutlineIcon />}
+                                    disabled={deletingTaskId === task.id || resendingTaskId === task.id || task.state === 'CANCEL_REQUESTED' || task.state === 'PREEMPTING'}
+                                    onClick={() => onDelete(task)}
+                                >
+                                    {deletingTaskId === task.id ? 'Deleting…' : task.state === 'CANCEL_REQUESTED' || task.state === 'PREEMPTING' ? 'Cancelling…' : 'Delete'}
+                                </Button>
+                            </Stack>
                         </Stack>
-                        <Button
-                            size="small"
-                            color="error"
-                            variant="outlined"
-                            startIcon={<DeleteOutlineIcon />}
-                            disabled={deletingTaskId === task.id || task.state === 'CANCEL_REQUESTED' || task.state === 'PREEMPTING'}
-                            onClick={() => onDelete(task)}
-                        >
-                            {deletingTaskId === task.id ? 'Deleting…' : task.state === 'CANCEL_REQUESTED' || task.state === 'PREEMPTING' ? 'Cancelling…' : 'Delete'}
-                        </Button>
-                    </Stack>
 
-                    <Typography variant="subtitle1" sx={{ mt: 1 }}>{task.name ?? task.type}</Typography>
-                    {task.description && <Typography variant="body2" color="text.secondary">{task.description}</Typography>}
+                        <Typography variant="subtitle1" sx={{ mt: 1 }}>{task.name ?? task.type}</Typography>
+                        {task.description && <Typography variant="body2" color="text.secondary">{task.description}</Typography>}
 
-                    <Box sx={{ mt: 1.25 }}>
-                        <DetailGrid
-                            values={[
-                                ['Task ID', task.id],
-                                ['Geometry', task.geometryType],
-                                ['Start', task.schedule?.start ? formatTimestamp(task.schedule.start) : 'Immediate'],
-                                ['End', task.schedule?.end ? formatTimestamp(task.schedule.end) : undefined],
-                                ['Duration', formatTaskDuration(task.duration)],
-                                ['Progress', task.percentComplete === undefined ? undefined : `${task.percentComplete.toFixed(1)}%`],
-                            ]}
-                        />
+                        <Box sx={{ mt: 1.25 }}>
+                            <DetailGrid
+                                values={[
+                                    ['Task ID', task.id],
+                                    ['Geometry', task.geometryType],
+                                    ['Start', task.schedule?.start ? formatTimestamp(task.schedule.start) : 'Immediate'],
+                                    ['End', task.schedule?.end ? formatTimestamp(task.schedule.end) : undefined],
+                                    ['Duration', formatTaskDuration(task.duration)],
+                                    ['Progress', task.percentComplete === undefined ? undefined : `${task.percentComplete.toFixed(1)}%`],
+                                ]}
+                            />
+                        </Box>
                     </Box>
-                </Box>
-            ))}
-        </Stack>
+                ))}
+            </Stack>
+
+            <Dialog
+                open={resendConfirmationTask !== undefined}
+                onClose={() => setResendConfirmationTask(undefined)}
+                fullWidth
+                maxWidth="sm"
+            >
+                <DialogTitle>Resend the entire task plan?</DialogTitle>
+                <DialogContent>
+                    <Stack spacing={2} sx={{ pt: 0.5 }}>
+                        <Alert severity="warning">
+                            This sends the complete task plan to the vehicle again from the beginning, not just the current leg or waypoint.
+                        </Alert>
+                        <Typography variant="body2">
+                            This recovery action is intended for cases such as a drone or autopilot reset. The vehicle may restart navigation from the first waypoint in the task.
+                        </Typography>
+                        {resendConfirmationTask && (
+                            <DetailGrid
+                                values={[
+                                    ['Task', resendConfirmationTask.name ?? resendConfirmationTask.type],
+                                    ['Task ID', resendConfirmationTask.id],
+                                    ['Progress', resendConfirmationTask.percentComplete === undefined ? undefined : `${resendConfirmationTask.percentComplete.toFixed(1)}%`],
+                                ]}
+                            />
+                        )}
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setResendConfirmationTask(undefined)}>Cancel</Button>
+                    <Button
+                        color="warning"
+                        variant="contained"
+                        onClick={() => {
+                            const task = resendConfirmationTask;
+                            setResendConfirmationTask(undefined);
+                            if (task) onResend(task);
+                        }}
+                    >
+                        Resend entire plan
+                    </Button>
+                </DialogActions>
+            </Dialog>
+        </>
     );
 }
 
