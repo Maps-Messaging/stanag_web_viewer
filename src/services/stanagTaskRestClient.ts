@@ -3,6 +3,18 @@ import { parseTaskAdmin } from './stanagAdapter';
 
 const TASK_PATH = 'stanag/tasks';
 
+export interface TaskResumeResult {
+    status: 'ACCEPTED' | 'NOT_FOUND' | 'REJECTED' | 'FAILED';
+    message: string;
+    previousMavlinkSequence?: number;
+    selectedLogicalItem?: number;
+    selectedMavlinkSequence?: number;
+    planFingerprint?: string;
+    missionId?: number;
+    missionReused: boolean;
+    missionReuploaded: boolean;
+}
+
 export async function getAllStanagTasks(configuration: BrokerConfiguration): Promise<DroneTask[]> {
     const response = await fetch(buildTaskUrl(configuration), {
         method: 'GET',
@@ -70,6 +82,22 @@ export async function resendStanagTask(configuration: BrokerConfiguration, taskI
     throw new Error(await responseError(response, `Unable to resend STANAG task ${taskId}`));
 }
 
+export async function resumeStanagTask(configuration: BrokerConfiguration, taskId: string, droneId: string): Promise<TaskResumeResult> {
+    const response = await fetch(buildTaskUrl(configuration, taskId, 'resume', droneId), {
+        method: 'POST',
+        headers: buildHeaders(configuration),
+    });
+    if (response.status !== 202 && response.status !== 200) {
+        throw new Error(await responseError(response, `Unable to resume STANAG task ${taskId}`));
+    }
+
+    const payload = await parseJsonResponse(response);
+    if (!isTaskResumeResult(payload)) {
+        throw new Error(`Unable to resume STANAG task ${taskId}: REST response was not a valid task resume result`);
+    }
+    return payload;
+}
+
 function buildTaskUrl(configuration: BrokerConfiguration, ...pathSegments: string[]): string {
     const baseUrl = configuration.restApiUrl.replace(/\/+$/, '');
     const path = [TASK_PATH, ...pathSegments.map((segment) => encodeURIComponent(segment))].join('/');
@@ -108,4 +136,13 @@ async function responseError(response: Response, prefix: string): Promise<string
     } catch {
         return `${prefix}: HTTP ${response.status}: ${body}`;
     }
+}
+
+function isTaskResumeResult(value: unknown): value is TaskResumeResult {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    const result = value as Record<string, unknown>;
+    return result.status === 'ACCEPTED'
+        && typeof result.message === 'string'
+        && typeof result.missionReused === 'boolean'
+        && typeof result.missionReuploaded === 'boolean';
 }

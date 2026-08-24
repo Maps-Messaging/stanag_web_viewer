@@ -108,7 +108,7 @@ export interface TaskDuration {
 
 export interface TaskSchedule {
   start: string;
-  end: string;
+  end?: string;
 }
 
 export type TaskGeometryType = 'POINT' | 'CIRCLE' | 'LINE' | 'RECTANGLE' | 'POLYGON' | 'CORRIDOR';

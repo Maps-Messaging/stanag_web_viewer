@@ -471,10 +471,13 @@ function parseTaskSchedule(value: unknown): DroneTask['schedule'] {
   if (value === undefined) return undefined;
   const time = asObject(value, 'task.time');
   const start = asString(time.start, 'task.time.start');
-  const end = asString(time.end, 'task.time.end');
+  const end = optionalString(time.end);
   const startMillis = Date.parse(start);
+  if (Number.isNaN(startMillis)) throw new Error('Task time contains an invalid ISO-8601 timestamp');
+  if (end === undefined) return { start };
+
   const endMillis = Date.parse(end);
-  if (Number.isNaN(startMillis) || Number.isNaN(endMillis)) throw new Error('Task time contains an invalid ISO-8601 timestamp');
+  if (Number.isNaN(endMillis)) throw new Error('Task time contains an invalid ISO-8601 timestamp');
   if (endMillis <= startMillis) throw new Error('Task time end must be after start');
   return { start, end };
 }
