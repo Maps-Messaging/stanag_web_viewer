@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BrokerConfiguration, DroneTask } from '../models/types';
-import { buildTaskAdminPush } from './stanagAdapter';
+import { buildTaskAdminPush, parseTaskAdmin } from './stanagAdapter';
 import { buildTaskSchedule, validateTaskSchedule } from './taskSchedule';
 
 describe('task schedule', () => {
@@ -20,11 +20,25 @@ describe('task schedule', () => {
     expect(payload.body.description.reposition.time).toEqual({ start: schedule.start });
   });
 
+  it('parses a start-only schedule received from MQTT or REST', () => {
+    const schedule = buildTaskSchedule('2026-08-24T12:30', '');
+    const payload = buildTaskAdminPush(configuration, { ...repositionTask, schedule });
+
+    expect(parseTaskAdmin(payload).task?.schedule).toEqual({ start: schedule.start });
+  });
+
   it('builds both bounds when an end is supplied', () => {
     const schedule = buildTaskSchedule('2026-08-24T12:30', '2026-08-24T13:45');
 
     expect(new Date(schedule.start).getTime()).toBe(new Date('2026-08-24T12:30').getTime());
     expect(new Date(schedule.end!).getTime()).toBe(new Date('2026-08-24T13:45').getTime());
+  });
+
+  it('parses a schedule with both bounds received from MQTT or REST', () => {
+    const schedule = buildTaskSchedule('2026-08-24T12:30', '2026-08-24T13:45');
+    const payload = buildTaskAdminPush(configuration, { ...repositionTask, schedule });
+
+    expect(parseTaskAdmin(payload).task?.schedule).toEqual(schedule);
   });
 
   it('accepts a valid start without an end', () => {
