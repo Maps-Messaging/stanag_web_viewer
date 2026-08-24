@@ -1,5 +1,6 @@
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ReplayIcon from '@mui/icons-material/Replay';
 import {
     Alert,
@@ -19,7 +20,7 @@ import {
 } from '@mui/material';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Drone, DroneTask, TaskDuration, TwinState } from '../models/types';
-import { deleteStanagTask, resendStanagTask } from '../services/stanagTaskRestClient';
+import { deleteStanagTask, resendStanagTask, resumeStanagTask } from '../services/stanagTaskRestClient';
 import { useAppStore } from '../state/useAppStore';
 import { AttitudeIndicator } from './AttitudeIndicator';
 
@@ -37,8 +38,10 @@ export function DroneDetailsDialog({
     const [tab, setTab] = useState(0);
     const [copyMessage, setCopyMessage] = useState<string>();
     const [taskError, setTaskError] = useState<string>();
+    const [taskMessage, setTaskMessage] = useState<string>();
     const [deletingTaskId, setDeletingTaskId] = useState<string>();
     const [resendingTaskId, setResendingTaskId] = useState<string>();
+    const [resumingTaskId, setResumingTaskId] = useState<string>();
     const tasks = useAppStore((state) => state.tasks);
     const configuration = useAppStore((state) => state.configuration);
     const upsertTask = useAppStore((state) => state.upsertTask);
@@ -49,8 +52,10 @@ export function DroneDetailsDialog({
             setTab(0);
             setCopyMessage(undefined);
             setTaskError(undefined);
+            setTaskMessage(undefined);
             setDeletingTaskId(undefined);
             setResendingTaskId(undefined);
+            setResumingTaskId(undefined);
         }
     }, [open, drone?.id]);
 
@@ -83,6 +88,7 @@ export function DroneDetailsDialog({
     async function deleteTask(task: DroneTask): Promise<void> {
         setDeletingTaskId(task.id);
         setTaskError(undefined);
+        setTaskMessage(undefined);
         try {
             await deleteStanagTask(configuration, task.id);
             const updatedTask = { ...task, state: 'CANCEL_REQUESTED' as const, updatedAt: Date.now() };
@@ -105,6 +111,7 @@ export function DroneDetailsDialog({
 
         setResendingTaskId(task.id);
         setTaskError(undefined);
+        setTaskMessage(undefined);
 
         try {
             await resendStanagTask(configuration, task.id, drone.id);
@@ -115,6 +122,32 @@ export function DroneDetailsDialog({
             addEvent({level: 'ERROR', message: `REST task resend failed: ${message}`, payload: task,});
         } finally {
             setResendingTaskId(undefined);
+        }
+    }
+
+    async function resumeTask(task: DroneTask): Promise<void> {
+        if (!drone) {
+            addEvent({ level: 'ERROR', message: `REST task resume failed: no drone is currently selected for task ${task.id}`, payload: task });
+            return;
+        }
+
+        setResumingTaskId(task.id);
+        setTaskError(undefined);
+        setTaskMessage(undefined);
+
+        try {
+            const result = await resumeStanagTask(configuration, task.id, drone.id);
+            const missionAction = result.missionReused ? 'onboard mission reused' : 'mission re-uploaded';
+            const selectedSequence = result.selectedMavlinkSequence === undefined ? '' : ` at MAVLink sequence ${result.selectedMavlinkSequence}`;
+            const message = `Resume accepted${selectedSequence}; ${missionAction}.`;
+            setTaskMessage(message);
+            addEvent({ level: 'INFO', message: `REST resume requested for active task ${task.id}: ${message}`, payload: { task, result } });
+        } catch (error) {
+            const message = String(error);
+            setTaskError(message);
+            addEvent({ level: 'ERROR', message: `REST task resume failed: ${message}`, payload: task });
+        } finally {
+            setResumingTaskId(undefined);
         }
     }
 
@@ -199,9 +232,12 @@ export function DroneDetailsDialog({
                         tasks={droneTasks}
                         deletingTaskId={deletingTaskId}
                         resendingTaskId={resendingTaskId}
+                        resumingTaskId={resumingTaskId}
                         error={taskError}
+                        message={taskMessage}
                         onDelete={(task) => void deleteTask(task)}
                         onResend={(task) => void resendTask(task)}
+                        onResume={(task) => void resumeTask(task)}
                     />
                 )}
 
@@ -489,18 +525,25 @@ function TasksTab({
                       tasks,
                       deletingTaskId,
                       resendingTaskId,
+                      resumingTaskId,
                       error,
+                      message,
                       onDelete,
                       onResend,
+                      onResume,
                   }: {
     tasks: DroneTask[];
     deletingTaskId?: string;
     resendingTaskId?: string;
+    resumingTaskId?: string;
     error?: string;
+    message?: string;
     onDelete: (task: DroneTask) => void;
     onResend: (task: DroneTask) => void;
+    onResume: (task: DroneTask) => void;
 }) {
     const [resendConfirmationTask, setResendConfirmationTask] = useState<DroneTask>();
+    const [resumeConfirmationTask, setResumeConfirmationTask] = useState<DroneTask>();
 
     if (tasks.length === 0) {
         return <Alert severity="info">No active or future tasks are registered for this vehicle.</Alert>;
@@ -510,6 +553,7 @@ function TasksTab({
         <>
             <Stack spacing={2}>
                 {error && <Alert severity="error">{error}</Alert>}
+                {message && <Alert severity="success">{message}</Alert>}
                 {tasks.map((task) => (
                     <Box key={task.id} sx={{ p: 1.5, border: 1, borderColor: 'divider', borderRadius: 1 }}>
                         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ sm: 'center' }}>
@@ -519,13 +563,25 @@ function TasksTab({
                                 {isFutureTask(task) && <Chip size="small" color="info" variant="outlined" label="FUTURE" />}
                             </Stack>
                             <Stack direction="row" spacing={0.75}>
-                                {task.state === 'ACTIVE' && (
+                                {isResumableTask(task) && (
+                                    <Button
+                                        size="small"
+                                        color="success"
+                                        variant="outlined"
+                                        startIcon={<PlayArrowIcon />}
+                                        disabled={isTaskActionPending(task.id, deletingTaskId, resendingTaskId, resumingTaskId)}
+                                        onClick={() => setResumeConfirmationTask(task)}
+                                    >
+                                        {resumingTaskId === task.id ? 'Resuming…' : 'Resume'}
+                                    </Button>
+                                )}
+                                {(task.state === 'ACTIVE' || task.state === 'EXECUTING') && (
                                     <Button
                                         size="small"
                                         color="warning"
                                         variant="outlined"
                                         startIcon={<ReplayIcon />}
-                                        disabled={resendingTaskId === task.id || deletingTaskId === task.id}
+                                        disabled={isTaskActionPending(task.id, deletingTaskId, resendingTaskId, resumingTaskId)}
                                         onClick={() => setResendConfirmationTask(task)}
                                     >
                                         {resendingTaskId === task.id ? 'Resending…' : 'Resend'}
@@ -536,7 +592,7 @@ function TasksTab({
                                     color="error"
                                     variant="outlined"
                                     startIcon={<DeleteOutlineIcon />}
-                                    disabled={deletingTaskId === task.id || resendingTaskId === task.id || task.state === 'CANCEL_REQUESTED' || task.state === 'PREEMPTING'}
+                                    disabled={isTaskActionPending(task.id, deletingTaskId, resendingTaskId, resumingTaskId) || task.state === 'CANCEL_REQUESTED' || task.state === 'PREEMPTING'}
                                     onClick={() => onDelete(task)}
                                 >
                                     {deletingTaskId === task.id ? 'Deleting…' : task.state === 'CANCEL_REQUESTED' || task.state === 'PREEMPTING' ? 'Cancelling…' : 'Delete'}
@@ -604,8 +660,60 @@ function TasksTab({
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            <Dialog
+                open={resumeConfirmationTask !== undefined}
+                onClose={() => setResumeConfirmationTask(undefined)}
+                fullWidth
+                maxWidth="sm"
+            >
+                <DialogTitle>Resume from saved task progress?</DialogTitle>
+                <DialogContent>
+                    <Stack spacing={2} sx={{ pt: 0.5 }}>
+                        <Alert severity="info">
+                            The vehicle will continue at the next unfinished logical waypoint. It will not restart from the beginning.
+                        </Alert>
+                        <Typography variant="body2">
+                            The original task deadline remains unchanged. The server will reuse the onboard mission when it matches, or re-upload the persisted mission when required.
+                        </Typography>
+                        {resumeConfirmationTask && (
+                            <DetailGrid
+                                values={[
+                                    ['Task', resumeConfirmationTask.name ?? resumeConfirmationTask.type],
+                                    ['Task ID', resumeConfirmationTask.id],
+                                    ['Progress', resumeConfirmationTask.percentComplete === undefined ? undefined : `${resumeConfirmationTask.percentComplete.toFixed(1)}%`],
+                                ]}
+                            />
+                        )}
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setResumeConfirmationTask(undefined)}>Cancel</Button>
+                    <Button
+                        color="success"
+                        variant="contained"
+                        onClick={() => {
+                            const task = resumeConfirmationTask;
+                            setResumeConfirmationTask(undefined);
+                            if (task) onResume(task);
+                        }}
+                    >
+                        Resume task
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </>
     );
+}
+
+const RESUMABLE_TASK_TYPES = new Set<DroneTask['type']>(['NAVIGATE', 'PATROL', 'SURVEY']);
+
+function isResumableTask(task: DroneTask): boolean {
+    return RESUMABLE_TASK_TYPES.has(task.type) && (task.state === 'ACTIVE' || task.state === 'EXECUTING');
+}
+
+function isTaskActionPending(taskId: string, deletingTaskId?: string, resendingTaskId?: string, resumingTaskId?: string): boolean {
+    return deletingTaskId === taskId || resendingTaskId === taskId || resumingTaskId === taskId;
 }
 
 function isCurrentOrFutureTask(task: DroneTask): boolean {
