@@ -18,8 +18,9 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { MessageTransport } from '../messaging/transport';
-import type { DroneTask, GeoPoint, TaskDuration, TaskGeometry, TaskGeometryType, TaskSchedule, TaskType } from '../models/types';
+import type { DroneTask, GeoPoint, TaskDuration, TaskGeometry, TaskGeometryType, TaskType } from '../models/types';
 import { validateTaskDuration } from '../services/taskDuration';
+import { buildTaskSchedule, validateTaskSchedule } from '../services/taskSchedule';
 import { createUuid } from '../services/uuid';
 import { useAppStore } from '../state/useAppStore';
 
@@ -105,7 +106,7 @@ export function TaskPanel({ onClose, transport }: Props) {
   const hasEndDateTime = endDateTime.length > 0;
   const durationFieldErrors = hasEndDateTime ? {} : durationErrors(durationHours, durationMinutes, durationSeconds);
   const durationError = Object.values(durationFieldErrors).find(Boolean);
-  const scheduleError = validateSchedule(startDateTime, endDateTime);
+  const scheduleError = validateTaskSchedule(startDateTime, endDateTime);
   const canSubmit = Boolean(
       selectedDrone && taskType && authorityGuid && transport && effectiveGeometryType && !geometryError && !submitting
       && !durationError
@@ -153,7 +154,7 @@ export function TaskPanel({ onClose, transport }: Props) {
     const duration = !hasEndDateTime
         ? parseTaskDuration(durationHours, durationMinutes, durationSeconds)
         : undefined;
-    const schedule = hasEndDateTime ? buildSchedule(startDateTime, endDateTime) : undefined;
+    const schedule = buildTaskSchedule(startDateTime, endDateTime);
     const task: DroneTask = {
       id: createUuid(),
       droneId: selectedDrone.id,
@@ -372,43 +373,6 @@ function parseTaskDuration(hours: string, minutes: string, seconds: string): Tas
 
 function totalDurationSeconds(duration: TaskDuration): number {
   return duration.hours * 3600 + duration.minutes * 60 + duration.seconds;
-}
-
-function validateSchedule(start: string, end: string): string | undefined {
-  if (start.length === 0) return 'Start is required.';
-  const startMillis = new Date(start).getTime();
-  if (!Number.isFinite(startMillis)) return 'Start is not a valid date and time.';
-  if (end.length === 0) return undefined;
-
-  const endMillis = new Date(end).getTime();
-  if (!Number.isFinite(endMillis)) return 'End is not a valid date and time.';
-  if (endMillis <= startMillis) return 'End must be after Start.';
-  return undefined;
-}
-
-function buildSchedule(start: string, end: string): TaskSchedule {
-  return {
-    start: localDateTimeToIsoOffset(start),
-    end: localDateTimeToIsoOffset(end),
-  };
-}
-
-function localDateTimeToIsoOffset(value: string): string {
-  const date = new Date(value);
-  const offsetMinutes = -date.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? '+' : '-';
-  const absoluteOffset = Math.abs(offsetMinutes);
-  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, '0');
-  const offsetRemainder = String(absoluteOffset % 60).padStart(2, '0');
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-
-  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${sign}${offsetHours}:${offsetRemainder}`;
 }
 
 function capitalise(value: string): string { return value.charAt(0).toUpperCase() + value.slice(1); }
