@@ -70,7 +70,7 @@ export function shouldApplyTaskState(existing: TaskState, incoming: TaskState): 
 export function mergePercentComplete(existing: number | undefined, incoming: number | undefined): number | undefined {
   if (incoming === undefined) return existing;
   if (existing === undefined) return incoming;
-  return incoming;
+  return Math.max(existing, incoming);
 }
 
 export function taskSeverity(state: DroneTask['state']): 'success' | 'info' | 'warning' | 'error' {
