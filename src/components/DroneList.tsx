@@ -19,6 +19,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { MessageTransport } from '../messaging/transport';
 import { CANCELLABLE_TASK_STATES, telemetryLabel } from '../services/operationalState';
+import { getTaskControlWarning } from '../services/taskControlState';
 import { useAppStore } from '../state/useAppStore';
 import { AttitudeIndicator } from './AttitudeIndicator';
 import { DroneDetailsDialog } from './DroneDetailsDialog';
@@ -114,6 +115,7 @@ const DroneListItem = memo(function DroneListItem({
       symbolSet: drone.symbolSet,
       lastSeen: drone.lastSeen,
       stale: drone.stale,
+      twin: drone.twin,
       systemId: drone.twin?.systemId,
       statusText: drone.twin?.lastStatusText,
       streamStatus: drone.mavlinkStreamStatus?.status,
@@ -134,6 +136,7 @@ const DroneListItem = memo(function DroneListItem({
   const rowId = row.id;
   const rowName = row.name;
   const activeTask = row.activeTask;
+  const taskControlWarning = getTaskControlWarning(row.twin, activeTask);
   const liveState = telemetryLabel(row, now);
   const detectDisabled = detecting || !row.connected || row.systemId === undefined;
   const detectTooltip = row.systemId === undefined
@@ -206,6 +209,11 @@ const DroneListItem = memo(function DroneListItem({
           {row.symbolSet && <Chip size="small" label={shortEnum(row.symbolSet)} />}
           <Chip size="small" label={liveState === 'KNOWN' ? liveState : `${liveState} ${formatAge(now - row.lastSeen)}`} color={liveState === 'LIVE' ? 'success' : liveState === 'STALE' ? 'warning' : 'default'} />
           <Chip size="small" label={streamStatusLabel(row.streamStatus)} color={streamStatusColor(row.streamStatus)} variant={row.hasStreamStatus ? 'filled' : 'outlined'} />
+          {taskControlWarning && (
+            <Tooltip title={`Active Stickleback task requires ${taskControlWarning.expectedMode}; vehicle reports ${taskControlWarning.actualMode}`}>
+              <Chip size="small" color="error" label="TASK CONTROL LOST" />
+            </Tooltip>
+          )}
         </Stack>
 
         {activeTask && (
