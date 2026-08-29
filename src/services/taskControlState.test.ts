@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { DroneTask, TwinState } from '../models/types';
 import { getTaskControlWarning } from './taskControlState';
 
-const activeTask = { state: 'ACTIVE' } as DroneTask;
-const executingTask = { state: 'EXECUTING' } as DroneTask;
-const pendingTask = { state: 'PENDING' } as DroneTask;
+const activeTask = { state: 'ACTIVE', type: 'REPOSITION' } as DroneTask;
+const executingTask = { state: 'EXECUTING', type: 'REPOSITION' } as DroneTask;
+const pendingTask = { state: 'PENDING', type: 'REPOSITION' } as DroneTask;
 
 function stickleback(flightMode?: string): TwinState {
   return {
@@ -43,4 +43,25 @@ describe('getTaskControlWarning', () => {
   it('does not warn when flight mode is unavailable', () => {
     expect(getTaskControlWarning(stickleback(), activeTask)).toBeUndefined();
   });
+
+  it.each(['NAVIGATE', 'PATROL', 'SCREEN', 'STANDBY', 'SURVEY'] as const)(
+    'accepts AUTO while Stickleback is executing a %s task',
+    (type) => {
+      expect(getTaskControlWarning(stickleback('AUTO'), { ...executingTask, type })).toBeUndefined();
+    },
+  );
+
+  it('warns when a Stickleback mission task leaves AUTO', () => {
+    expect(getTaskControlWarning(stickleback('GUIDED'), { ...activeTask, type: 'NAVIGATE' })).toEqual({
+      expectedMode: 'AUTO',
+      actualMode: 'GUIDED',
+    });
+  });
+
+  it.each(['LOITER', 'DETECT'] as const)(
+    'does not infer a required mode for %s tasks',
+    (type) => {
+      expect(getTaskControlWarning(stickleback('MANUAL'), { ...activeTask, type })).toBeUndefined();
+    },
+  );
 });
