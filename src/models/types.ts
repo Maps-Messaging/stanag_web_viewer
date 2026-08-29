@@ -38,7 +38,8 @@ export interface TwinAutopilotState { modeNumber?: number; autopilotType?: strin
 
 export interface TwinState {
   uuid?: string; twinId?: string; twinType?: string; displayName?: string; callSign?: string; modelName?: string; vehicleClass?: string;
-  systemId?: number; componentId?: number; mmsi?: number; descriptionString?: string; armed?: boolean; flightMode?: string;
+  altitudeMode?: 'FIXED' | 'CURRENT' | 'TASK'; altitudeMeters?: number;
+  systemId?: number; componentId?: number; mmsi?: number; descriptionString?: string; armed?: boolean; flightMode?: string; failsafe?: boolean;
   gpsValid?: boolean; missionState?: string; landedState?: string; vtolState?: string; lifecycleStatus?: string; readinessState?: string;
   registrationReady?: boolean; commandReady?: boolean; missingReadinessItems?: string[]; degradedReadinessItems?: string[];
   blockingReadinessItems?: string[]; headingDegrees?: number; groundSpeedMetersPerSecond?: number; verticalSpeedMetersPerSecond?: number;

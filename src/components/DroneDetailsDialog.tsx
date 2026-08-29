@@ -321,6 +321,9 @@ function GeneralTab({
                         ['Autopilot', twin?.autopilotState?.autopilotType],
                         ['MAVLink version', twin?.autopilotState?.mavlinkVersion],
                         ['Flight mode', twin?.flightMode],
+                        ['Armed', booleanText(twin?.armed)],
+                        ['MAV system state', formatMavSystemState(twin?.autopilotState?.systemStatus)],
+                        ['Failsafe', booleanText(twin?.failsafe)],
                         ['Mission state', twin?.missionState],
                         ['Landed state', twin?.landedState],
                         ['Lifecycle', twin?.lifecycleStatus],
@@ -328,6 +331,8 @@ function GeneralTab({
                         ['Registration ready', booleanText(twin?.registrationReady)],
                         ['Command ready', booleanText(twin?.commandReady)],
                         ['Stop action', twin?.stopAction],
+                        ['Altitude mode', cleanEnum(twin?.altitudeMode)],
+                        ['Configured altitude', formatMeasurement(twin?.altitudeMeters, 'm')],
                         ['Last seen', formatTimestamp(twin?.lastSeenAt)],
                         ['Valid until', formatTimestamp(twin?.validTill)],
                     ]}
@@ -843,6 +848,25 @@ function booleanText(value: boolean | undefined): string {
     }
 
     return value ? 'Yes' : 'No';
+}
+
+function formatMavSystemState(value: number | undefined): string {
+    if (value === undefined) {
+        return 'Unknown';
+    }
+
+    const states: Record<number, string> = {
+        0: 'Uninitialised',
+        1: 'Booting',
+        2: 'Calibrating',
+        3: 'Standby',
+        4: 'Active',
+        5: 'Critical',
+        6: 'Emergency',
+        7: 'Power off',
+        8: 'Flight termination',
+    };
+    return states[value] ?? `Unknown (${value})`;
 }
 
 function formatCoordinate(value: number | undefined): string {
